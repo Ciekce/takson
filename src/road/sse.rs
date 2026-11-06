@@ -1,0 +1,81 @@
+use crate::bitboard::Bitboard;
+use std::arch::x86_64::*;
+
+#[must_use]
+pub(super) fn influence(road_occ: Bitboard, edges: &mut [Bitboard; 4]) -> bool {
+    unsafe { influence_sse42(road_occ, edges) }
+}
+
+#[must_use]
+#[target_feature(enable = "sse4.2")]
+fn influence_sse42(road_occ: Bitboard, edges: &mut [Bitboard; 4]) -> bool {
+    let mut masks_ul = _mm_set_epi64x(edges[2].raw() as i64, edges[0].raw() as i64);
+    let mut masks_dr = _mm_set_epi64x(edges[3].raw() as i64, edges[1].raw() as i64);
+
+    let left_edge = _mm_set1_epi64x(Bitboard::LEFT_EDGE.raw() as i64);
+    let right_edge = _mm_set1_epi64x(Bitboard::RIGHT_EDGE.raw() as i64);
+
+    let road_occ = _mm_set1_epi64x(road_occ.raw() as i64);
+
+    let calc_next_masks = |masks| {
+        let next_masks_u = _mm_slli_epi64::<6>(masks);
+        let next_masks_d = _mm_srli_epi64::<6>(masks);
+        let next_masks_ud = _mm_or_si128(next_masks_u, next_masks_d);
+
+        let next_masks_l = _mm_andnot_si128(left_edge, _mm_slli_epi64::<1>(masks));
+        let next_masks_r = _mm_andnot_si128(right_edge, _mm_srli_epi64::<1>(masks));
+        let next_masks_lr = _mm_or_si128(next_masks_l, next_masks_r);
+
+        _mm_or_si128(masks, _mm_or_si128(next_masks_ud, next_masks_lr))
+    };
+
+    let mut influence_masks_ul = calc_next_masks(masks_ul);
+    let mut influence_masks_dr = calc_next_masks(masks_dr);
+
+    let next_masks_ul = _mm_and_si128(influence_masks_ul, road_occ);
+    let next_masks_dr = _mm_and_si128(influence_masks_dr, road_occ);
+
+    let result = 'exit: {
+        if _mm_testc_si128(masks_ul, next_masks_ul) != 0 && _mm_testc_si128(masks_dr, next_masks_dr) != 0 {
+            break 'exit false;
+        }
+
+        masks_ul = next_masks_ul;
+        masks_dr = next_masks_dr;
+
+        loop {
+            influence_masks_ul = calc_next_masks(masks_ul);
+            influence_masks_dr = calc_next_masks(masks_dr);
+
+            let next_masks_ul = _mm_and_si128(influence_masks_ul, road_occ);
+            let next_masks_dr = _mm_and_si128(influence_masks_dr, road_occ);
+
+            if _mm_testz_si128(next_masks_ul, next_masks_dr) == 0 {
+                break 'exit true;
+            }
+
+            if _mm_testc_si128(masks_ul, next_masks_ul) != 0 && _mm_testc_si128(masks_dr, next_masks_dr) != 0 {
+                break 'exit false;
+            }
+
+            masks_ul = next_masks_ul;
+            masks_dr = next_masks_dr;
+        }
+    };
+
+    influence_masks_ul = _mm_or_si128(
+        influence_masks_ul,
+        _mm_set_epi64x(Bitboard::LEFT_EDGE.raw() as i64, Bitboard::UPPER_EDGE.raw() as i64),
+    );
+    influence_masks_dr = _mm_or_si128(
+        influence_masks_dr,
+        _mm_set_epi64x(Bitboard::RIGHT_EDGE.raw() as i64, Bitboard::LOWER_EDGE.raw() as i64),
+    );
+
+    let edges_ul = unsafe { std::mem::transmute::<__m128i, [u64; 2]>(influence_masks_ul) }.map(Bitboard::from_raw);
+    let edges_dr = unsafe { std::mem::transmute::<__m128i, [u64; 2]>(influence_masks_dr) }.map(Bitboard::from_raw);
+
+    *edges = [edges_ul[0], edges_dr[0], edges_ul[1], edges_dr[1]];
+
+    result
+}

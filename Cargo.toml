@@ -1,0 +1,10 @@
+[package]
+name = "takson"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+pext = []
+
+[dependencies]
+arrayvec = "0.7.8"

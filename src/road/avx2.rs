@@ -1,0 +1,71 @@
+use crate::bitboard::Bitboard;
+use std::arch::x86_64::*;
+
+#[must_use]
+pub(super) fn influence(road_occ: Bitboard, edges: &mut [Bitboard; 4]) -> bool {
+    //SAFETY: self-explanatory
+    unsafe { influence_avx2(road_occ, edges) }
+}
+
+#[must_use]
+#[target_feature(enable = "avx2")]
+fn influence_avx2(road_occ: Bitboard, edges: &mut [Bitboard; 4]) -> bool {
+    // https://github.com/rust-lang/rust/issues/111147
+    const fn mm_shuffle(z: u32, y: u32, x: u32, w: u32) -> i32 {
+        ((z << 6) | (y << 4) | (x << 2) | w) as i32
+    }
+
+    let mut masks = unsafe { std::mem::transmute::<[Bitboard; 4], __m256i>(*edges) };
+
+    let left_edge = _mm256_set1_epi64x(Bitboard::LEFT_EDGE.raw() as i64);
+    let right_edge = _mm256_set1_epi64x(Bitboard::RIGHT_EDGE.raw() as i64);
+
+    let road_occ = _mm256_set1_epi64x(road_occ.raw() as i64);
+
+    let calc_next_masks = |masks| {
+        let next_masks_u = _mm256_slli_epi64::<6>(masks);
+        let next_masks_d = _mm256_srli_epi64::<6>(masks);
+        let next_masks_ud = _mm256_or_si256(next_masks_u, next_masks_d);
+
+        let next_masks_l = _mm256_andnot_si256(left_edge, _mm256_slli_epi64::<1>(masks));
+        let next_masks_r = _mm256_andnot_si256(right_edge, _mm256_srli_epi64::<1>(masks));
+        let next_masks_lr = _mm256_or_si256(next_masks_l, next_masks_r);
+
+        _mm256_or_si256(masks, _mm256_or_si256(next_masks_ud, next_masks_lr))
+    };
+
+    let mut influence_masks = calc_next_masks(masks);
+    let next_masks = _mm256_and_si256(influence_masks, road_occ);
+
+    let result = 'exit: {
+        if _mm256_testc_si256(masks, next_masks) != 0 {
+            break 'exit false;
+        }
+
+        masks = next_masks;
+
+        loop {
+            influence_masks = calc_next_masks(masks);
+            let next_masks = _mm256_and_si256(influence_masks, road_occ);
+            let swizzled = _mm256_shuffle_epi32::<{ mm_shuffle(1, 0, 3, 2) }>(next_masks);
+
+            if _mm256_testz_si256(next_masks, swizzled) == 0 {
+                break 'exit true;
+            }
+
+            if _mm256_testc_si256(masks, next_masks) != 0 {
+                break 'exit false;
+            }
+
+            masks = next_masks;
+        }
+    };
+
+    influence_masks = _mm256_or_si256(influence_masks, unsafe {
+        std::mem::transmute::<[Bitboard; 4], __m256i>(Bitboard::EDGES)
+    });
+
+    *edges = unsafe { std::mem::transmute::<__m256i, [u64; 4]>(influence_masks) }.map(Bitboard::from_raw);
+
+    result
+}
