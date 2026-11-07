@@ -19,6 +19,7 @@ struct Node {
     idx: u32,
     parent: u32,
     mv: Option<Move>,
+    policy: f32,
     visits: usize,
     total_score: f64,
     first_child_idx: u32,
@@ -28,16 +29,13 @@ struct Node {
 
 impl Node {
     #[must_use]
-    fn new(idx: u32, parent: u32, mv: Move) -> Self {
+    fn new(idx: u32, parent: u32, mv: Move, policy: f32) -> Self {
         Self {
             idx,
             parent,
             mv: Some(mv),
-            visits: 0,
-            total_score: 0.0,
-            first_child_idx: 0,
-            child_count: 0,
-            state: None,
+            policy,
+            ..Default::default()
         }
     }
 
@@ -98,7 +96,7 @@ impl Searcher {
         moves_to_exclude: &HashSet<Move>,
         _options: &TeiOptions,
     ) {
-        const REPORT_INTERVAL: usize = 65536;
+        const REPORT_INTERVAL: usize = 8192;
 
         self.tree.clear();
         self.construct_root(root_pos, moves_to_search, moves_to_exclude);
@@ -148,10 +146,11 @@ impl Searcher {
         for child_idx in self.tree[0].children() {
             let node = &self.tree[child_idx];
             println!(
-                "info string {} V: {}, Q: {}",
+                "info string {} V: {}, Q: {} P: {}",
                 node.mv.unwrap(),
                 node.visits,
-                1.0 - node.q()
+                1.0 - node.q(),
+                node.policy
             );
             total_visits += node.visits;
         }
@@ -247,8 +246,11 @@ impl Searcher {
         get_root_moves(&mut moves, root_pos, moves_to_search, moves_to_exclude);
 
         for &mv in moves.iter() {
-            self.tree.push(Node::new(self.tree.len() as u32, 0, mv));
+            let policy = self.get_policy(root_pos, mv);
+            self.tree.push(Node::new(self.tree.len() as u32, 0, mv, policy));
         }
+
+        self.normalize_policy(1..self.tree.len());
 
         let root = &mut self.tree[0];
         root.first_child_idx = 1;
@@ -281,8 +283,8 @@ impl Searcher {
 
             let node = &self.tree[curr];
 
+            let fpu = if curr == 0 { 1000.0 } else { FPU };
             let e = CPUCT * (node.visits as f32).sqrt();
-            let p = 1.0 / node.child_count as f32;
 
             let mut best_child = 0;
             let mut best_child_puct = f32::NEG_INFINITY;
@@ -290,8 +292,8 @@ impl Searcher {
             for child_idx in node.children() {
                 let child = &self.tree[child_idx];
 
-                let q = if child.visits == 0 { FPU } else { 1.0 - child.q() };
-                let puct = q + e * p / (1 + child.visits) as f32;
+                let q = if child.visits == 0 { fpu } else { 1.0 - child.q() };
+                let puct = q + e * child.policy / (1 + child.visits) as f32;
 
                 if puct > best_child_puct {
                     best_child = child_idx;
@@ -318,8 +320,11 @@ impl Searcher {
         let first_child_idx = self.tree.len() as u32;
 
         for &mv in moves.iter() {
-            self.tree.push(Node::new(self.tree.len() as u32, node_idx, mv));
+            let policy = self.get_policy(&self.pos, mv);
+            self.tree.push(Node::new(self.tree.len() as u32, node_idx, mv, policy));
         }
+
+        self.normalize_policy(first_child_idx as usize..self.tree.len());
 
         let node = &mut self.tree[node_idx as usize];
         node.first_child_idx = first_child_idx;
@@ -356,6 +361,29 @@ impl Searcher {
 
             node_idx = node.parent;
             u = 1.0 - u;
+        }
+    }
+
+    fn get_policy(&self, pos: &Position, mv: Move) -> f32 {
+        let mut new_pos = *pos;
+        new_pos.apply_move(mv);
+        let value = 1.0 - eval_value(&new_pos);
+        2.0 * (value / (1.0 - value)).ln()
+    }
+
+    fn normalize_policy(&mut self, nodes: Range<usize>) {
+        let nodes = &mut self.tree[nodes];
+
+        let max = nodes.iter().map(|node| node.policy).reduce(f32::max).unwrap();
+
+        for node in nodes.iter_mut() {
+            node.policy = (node.policy - max).exp();
+        }
+
+        let total: f32 = nodes.iter().map(|node| node.policy).sum();
+
+        for node in nodes.iter_mut() {
+            node.policy /= total;
         }
     }
 }
