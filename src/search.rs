@@ -165,16 +165,20 @@ impl Searcher {
         let mut total_visits = 0;
         for child_idx in self.tree[0].children() {
             let node = &self.tree[child_idx];
+            let q = match node.visits > 0 {
+                true => (1.0 - node.q()).to_string(),
+                false => "n/a".to_string(),
+            };
             println!(
                 "info string {} V: {}, Q: {} P: {}",
                 node.mv.unwrap(),
                 node.visits,
-                1.0 - node.q(),
+                q,
                 node.policy
             );
             total_visits += node.visits;
         }
-        assert_eq!(total_visits + 1, root.visits);
+        assert_eq!(total_visits, root.visits);
         println!();
 
         println!("bestmove {}", first_best_child.mv.unwrap());
@@ -293,7 +297,7 @@ impl Searcher {
                 break;
             }
 
-            if self.tree[curr].visits == 1 && !self.expand(curr as u32) {
+            if curr != 0 && self.tree[curr].visits == 1 && !self.expand(curr as u32) {
                 return None;
             }
 
@@ -331,6 +335,7 @@ impl Searcher {
 
     fn expand(&mut self, node_idx: u32) -> bool {
         assert!(!self.tree[node_idx as usize].is_terminal());
+        assert_eq!(self.tree[node_idx as usize].child_count, 0);
 
         let mut moves = Vec::new();
         generate_moves(&mut moves, &self.pos);
