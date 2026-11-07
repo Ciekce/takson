@@ -63,6 +63,7 @@ pub struct Searcher {
     tree: Vec<Node>,
     pos: Position,
     key_history: Vec<u64>,
+    selection_depth: u32,
 }
 
 impl Searcher {
@@ -73,6 +74,7 @@ impl Searcher {
             tree: Vec::with_capacity(node_count),
             pos: Position::startpos(),
             key_history: Vec::with_capacity(1024),
+            selection_depth: 0,
         }
     }
 
@@ -107,9 +109,19 @@ impl Searcher {
 
         let mut iters = 0usize;
 
+        let mut total_depth = 0;
+        let mut max_depth = 0;
+
+        let mut average_depth = 0;
+
+        let mut last_report_iter = 0;
+
         loop {
+            let iter_idx = iters;
+
             self.pos = *root_pos;
             self.key_history.truncate(new_key_history.len());
+            self.selection_depth = 0;
 
             let Some(leaf) = self.select_expand() else {
                 println!("info string Tree full, stopping");
@@ -123,20 +135,28 @@ impl Searcher {
 
             iters += 1;
 
-            if iters.is_multiple_of(REPORT_INTERVAL) {
-                self.report(start_time, iters);
-            }
-
             if limits.should_stop(iters) {
                 break;
             }
+
+            total_depth += self.selection_depth as u64;
+            max_depth = max_depth.max(self.selection_depth);
+
+            let new_average_depth = (total_depth as f64 / iters as f64).round() as u32;
+
+            if (iter_idx - last_report_iter).is_multiple_of(REPORT_INTERVAL) || new_average_depth > average_depth {
+                self.report(start_time, iters, new_average_depth, max_depth);
+                last_report_iter = iter_idx;
+            }
+
+            average_depth = average_depth.max(new_average_depth);
         }
 
-        self.final_report(start_time, iters);
+        self.final_report(start_time, iters, average_depth, max_depth);
     }
 
-    fn final_report(&self, start_time: Instant, iters: usize) {
-        let first_best_child = self.report(start_time, iters);
+    fn final_report(&self, start_time: Instant, iters: usize, depth: u32, seldepth: u32) {
+        let first_best_child = self.report(start_time, iters, depth, seldepth);
         assert_ne!(first_best_child.idx, 0);
 
         println!();
@@ -160,7 +180,7 @@ impl Searcher {
         println!("bestmove {}", first_best_child.mv.unwrap());
     }
 
-    fn report(&self, start_time: Instant, iters: usize) -> &Node {
+    fn report(&self, start_time: Instant, iters: usize, depth: u32, seldepth: u32) -> &Node {
         let mut pv = ArrayVec::new();
         let first_best_child = self.build_pv(&mut pv);
 
@@ -174,7 +194,7 @@ impl Searcher {
         let filled = self.tree.len() as f64 / capacity as f64;
 
         print!(
-            "info depth 1 seldepth 1 time {} nodes {} nps {} score cp {cp} wdl {w} {d} {l} hashfull {} pv",
+            "info depth {depth} seldepth {seldepth} time {} nodes {} nps {} score cp {cp} wdl {w} {d} {l} hashfull {} pv",
             (time * 1000.0) as usize,
             iters,
             (iters as f64 / time) as usize,
@@ -280,6 +300,8 @@ impl Searcher {
             if self.tree[curr].child_count == 0 {
                 break;
             }
+
+            self.selection_depth += 1;
 
             let node = &self.tree[curr];
 
