@@ -23,7 +23,7 @@ struct Node {
     total_score: f64,
     first_child_idx: u32,
     child_count: u16,
-    result: Option<TerminalState>,
+    state: Option<GameState>,
 }
 
 impl Node {
@@ -37,7 +37,7 @@ impl Node {
             total_score: 0.0,
             first_child_idx: 0,
             child_count: 0,
-            result: None,
+            state: None,
         }
     }
 
@@ -57,7 +57,7 @@ impl Node {
 
     #[must_use]
     fn is_terminal(&self) -> bool {
-        self.result.is_some()
+        self.state.is_some_and(GameState::is_terminal)
     }
 }
 
@@ -155,7 +155,7 @@ impl Searcher {
             );
             total_visits += node.visits;
         }
-        assert_eq!(total_visits, root.visits);
+        assert_eq!(total_visits + 1, root.visits);
         println!();
 
         println!("bestmove {}", first_best_child.mv.unwrap());
@@ -262,19 +262,24 @@ impl Searcher {
 
         let mut curr = 0;
         loop {
-            let node = &self.tree[curr];
-
             if curr != 0 {
                 self.key_history.push(self.pos.key());
-                self.pos.apply_move(node.mv.unwrap());
+                self.pos.apply_move(self.tree[curr].mv.unwrap());
             }
 
-            if node.is_terminal() || node.child_count == 0 {
-                if !node.is_terminal() && !self.expand(curr as u32) {
-                    return None;
-                }
+            if self.tree[curr].is_terminal() {
                 break;
             }
+
+            if self.tree[curr].visits == 1 && !self.expand(curr as u32) {
+                return None;
+            }
+
+            if self.tree[curr].child_count == 0 {
+                break;
+            }
+
+            let node = &self.tree[curr];
 
             let e = CPUCT * (node.visits as f32).sqrt();
             let p = 1.0 / node.child_count as f32;
@@ -303,14 +308,6 @@ impl Searcher {
     fn expand(&mut self, node_idx: u32) -> bool {
         assert!(!self.tree[node_idx as usize].is_terminal());
 
-        if let Some(terminal_state) =
-            check_terminal_state(&self.key_history, &self.pos, self.tree[node_idx as usize].mv.unwrap())
-        {
-            let node = &mut self.tree[node_idx as usize];
-            node.result = Some(terminal_state);
-            return true;
-        }
-
         let mut moves = Vec::new();
         generate_moves(&mut moves, &self.pos);
 
@@ -333,9 +330,15 @@ impl Searcher {
 
     #[must_use]
     fn simulate(&mut self, node_idx: u32) -> f32 {
-        let node = &self.tree[node_idx as usize];
-        node.result
-            .map(TerminalState::u)
+        let node = &mut self.tree[node_idx as usize];
+
+        if node.state.is_none() {
+            let state = check_game_state(&self.key_history, &self.pos, node.mv.unwrap());
+            node.state = Some(state);
+        }
+
+        node.state
+            .and_then(GameState::u)
             .unwrap_or_else(|| eval_value(&self.pos))
     }
 
@@ -390,45 +393,48 @@ fn get_root_moves(
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-enum TerminalState {
+enum GameState {
     Win,
     Draw,
     Loss,
+    Ongoing,
 }
 
-impl TerminalState {
+impl GameState {
     #[must_use]
-    fn u(self) -> f32 {
+    fn is_terminal(self) -> bool {
+        self != Self::Ongoing
+    }
+
+    #[must_use]
+    fn u(self) -> Option<f32> {
         match self {
-            Self::Win => 1.0,
-            Self::Draw => 0.5,
-            Self::Loss => 0.0,
+            Self::Win => Some(1.0),
+            Self::Draw => Some(0.5),
+            Self::Loss => Some(0.0),
+            Self::Ongoing => None,
         }
     }
 }
 
 // returns wins/losses from the perspective of the *position after the move*
-fn check_terminal_state(key_history: &[u64], pos: &Position, prev_move: Move) -> Option<TerminalState> {
+fn check_game_state(key_history: &[u64], pos: &Position, prev_move: Move) -> GameState {
     // player we care about: the one that made the move
     let stm = pos.stm().flip();
 
     if pos.has_road(stm) {
-        return Some(TerminalState::Loss);
+        return GameState::Loss;
     }
 
     if pos.has_road(stm.flip()) {
-        return Some(TerminalState::Win);
+        return GameState::Win;
     }
 
     match pos.count_flats() {
         FlatCountOutcome::None => {}
-        FlatCountOutcome::Draw => return Some(TerminalState::Draw),
+        FlatCountOutcome::Draw => return GameState::Draw,
         FlatCountOutcome::Win(color) => {
-            return if color == stm {
-                Some(TerminalState::Loss)
-            } else {
-                Some(TerminalState::Win)
-            };
+            return if color == stm { GameState::Loss } else { GameState::Win };
         }
     }
 
@@ -438,11 +444,11 @@ fn check_terminal_state(key_history: &[u64], pos: &Position, prev_move: Move) ->
             if key == pos.key() {
                 repetitions += 1;
                 if repetitions == 2 {
-                    return Some(TerminalState::Draw);
+                    return GameState::Draw;
                 }
             }
         }
     }
 
-    None
+    GameState::Ongoing
 }
