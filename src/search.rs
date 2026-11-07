@@ -118,7 +118,6 @@ impl Searcher {
                 println!("info string Tree full, stopping");
                 break;
             };
-            //println!("info string selected {}", leaf);
 
             assert_ne!(leaf, 0);
 
@@ -150,19 +149,14 @@ impl Searcher {
         for child_idx in self.tree[0].children() {
             let node = &self.tree[child_idx];
             println!(
-                "info string {} {} V: {}, Q: {}",
-                node.idx,
+                "info string {} V: {}, Q: {}",
                 node.mv.unwrap(),
                 node.visits,
                 1.0 - node.q()
             );
             total_visits += node.visits;
         }
-        //assert_eq!(total_visits + 1, root.visits);
-        println!(
-            "info string total nodes: {}",
-            self.tree.iter().filter(|node| node.visits != 0).count()
-        );
+        assert_eq!(total_visits, root.visits);
         println!();
 
         println!("bestmove {}", first_best_child.mv.unwrap());
@@ -205,7 +199,7 @@ impl Searcher {
 
         loop {
             let mut best_child_idx = 0;
-            let mut best_child_q = 0.0;
+            let mut best_child_q = f32::NEG_INFINITY;
 
             for child_idx in node.children() {
                 let child = &self.tree[child_idx];
@@ -303,18 +297,6 @@ impl Searcher {
                     1.0 - child.q()
                 };
                 let puct = q + e * p / (1 + child.visits) as f32;
-                /*
-                if curr == 0 {
-                    println!(
-                        "node {} move {} v {} q {} puct {}",
-                        child_idx,
-                        child.mv.unwrap(),
-                        child.visits,
-                        q,
-                        puct
-                    );
-                }
-                 */
 
                 if puct > best_child_puct {
                     best_child = child_idx;
@@ -337,7 +319,6 @@ impl Searcher {
             self.tree[node_idx as usize].mv.unwrap(),
         ) {
             let node = &mut self.tree[node_idx as usize];
-            node.visits += 1;
             node.result = Some(terminal_state);
             return true;
         }
@@ -374,9 +355,6 @@ impl Searcher {
     fn backprop(&mut self, mut node_idx: u32, mut u: f32) {
         assert_ne!(node_idx, 0);
         loop {
-            node_idx = self.tree[node_idx as usize].parent;
-            u = 1.0 - u;
-
             let node = &mut self.tree[node_idx as usize];
 
             node.visits += 1;
@@ -385,6 +363,9 @@ impl Searcher {
             if node_idx == 0 {
                 break;
             }
+
+            node_idx = node.parent;
+            u = 1.0 - u;
         }
     }
 }
