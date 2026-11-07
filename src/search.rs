@@ -394,6 +394,20 @@ impl Searcher {
     fn get_policy(&self, pos: &Position, mv: Move) -> f32 {
         let mut new_pos = *pos;
         new_pos.apply_move(mv);
+
+        if new_pos.has_road(pos.stm()) {
+            return 500.0;
+        } else if new_pos.has_road(pos.stm().flip()) {
+            return -500.0;
+        } else {
+            match new_pos.count_flats() {
+                FlatCountOutcome::Draw => return 0.0,
+                FlatCountOutcome::Win(side) if side == pos.stm() => return 500.0,
+                FlatCountOutcome::Win(side) if side == pos.stm().flip() => return -500.0,
+                _ => {}
+            }
+        }
+
         let value = 1.0 - eval_value(&new_pos);
         2.0 * (value / (1.0 - value)).ln()
     }
