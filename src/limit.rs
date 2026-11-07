@@ -4,7 +4,7 @@ use std::time::Instant;
 
 pub const MAX_MOVE_OVERHEAD_MS: u64 = 10000;
 
-const TIME_CHECK_INTERVAL: usize = 1024;
+const TIME_CHECK_INTERVAL: usize = 16;
 
 const MAX_STONES_IN_HAND: u8 = 62;
 const STONE_COMPLEXITY_SCALE: f64 = 5.0;
