@@ -2,8 +2,8 @@ use crate::core::Color;
 use crate::limit::{Limits, MAX_MOVE_OVERHEAD_MS};
 use crate::perft::{perft, split_perft};
 use crate::position::*;
-use crate::search::Searcher;
 use crate::search;
+use crate::search::{DEFAULT_TREE_SIZE_MIB, MAX_TREE_SIZE_MIB, Searcher};
 use crate::value::eval_value;
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
@@ -61,7 +61,7 @@ impl TeiHandler {
         Self {
             pos: Position::startpos(),
             key_history: Vec::with_capacity(1024),
-            searcher: Searcher::new(),
+            searcher: Searcher::new(DEFAULT_TREE_SIZE_MIB),
             options: TeiOptions::default(),
             half_komi: Position::DEFAULT_HALF_KOMI,
         }
@@ -130,7 +130,10 @@ impl TeiHandler {
             Position::MIN_HALF_KOMI,
             Position::MAX_HALF_KOMI
         );
-        println!("option name Hash type spin default 1 min 1 max 1");
+        println!(
+            "option name Hash type spin default {} min 1 max {}",
+            DEFAULT_TREE_SIZE_MIB, MAX_TREE_SIZE_MIB
+        );
         println!("option name Threads type spin default 1 min 1 max 1");
         println!(
             "option name MultiPV type spin default {} min 1 max {}",
@@ -227,7 +230,10 @@ impl TeiHandler {
                 Err(_) => invalid(&value),
             },
             "hash" => {
-                if let Err(_) = value.parse::<usize>() {
+                if let Ok(size) = value.parse::<usize>() {
+                    let size = size.clamp(1, MAX_TREE_SIZE_MIB);
+                    self.searcher.set_tree_size(size);
+                } else {
                     invalid(&value);
                 }
             }
@@ -568,11 +574,7 @@ impl TeiHandler {
     fn handle_eval(&self) {
         let value = eval_value(&self.pos);
         let cp = score_to_cp(value);
-        println!(
-            "Value (stm-relative): {:.6} ({})",
-            value,
-            cp as f64 / 100.0
-        );
+        println!("Value (stm-relative): {:.6} ({})", value, cp as f64 / 100.0);
     }
 
     fn handle_perft(&self, args: &[&str]) {
