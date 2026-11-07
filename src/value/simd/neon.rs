@@ -66,12 +66,7 @@ pub fn min_i16(a: VecI16, b: VecI16) -> VecI16 {
 #[must_use]
 #[inline(always)]
 pub fn min_u16(a: VecI16, b: VecI16) -> VecI16 {
-    unsafe {
-        vreinterpretq_s16_u16(vminq_u16(
-            vreinterpretq_u16_s16(a),
-            vreinterpretq_u16_s16(b),
-        ))
-    }
+    unsafe { vreinterpretq_s16_u16(vminq_u16(vreinterpretq_u16_s16(a), vreinterpretq_u16_s16(b))) }
 }
 
 #[must_use]
@@ -225,13 +220,7 @@ pub fn dpbusdx2_i32(sum: VecI32, a_1: VecU8, b_1: VecI8, a_2: VecU8, b_2: VecI8)
 
 #[must_use]
 #[inline(always)]
-pub fn dpwssdx2_i32(
-    acc: [VecI32; 2],
-    a_1: VecI16,
-    b_1: VecI16,
-    a_2: VecI16,
-    b_2: VecI16,
-) -> [VecI32; 2] {
+pub fn dpwssdx2_i32(acc: [VecI32; 2], a_1: VecI16, b_1: VecI16, a_2: VecI16, b_2: VecI16) -> [VecI32; 2] {
     unsafe {
         let lo = vmlal_s16(acc[0], vget_low_s16(a_1), vget_low_s16(b_1));
         let lo = vmlal_s16(lo, vget_low_s16(a_2), vget_low_s16(b_2));

@@ -139,10 +139,7 @@ impl TeiHandler {
             "option name MultiPV type spin default {} min 1 max {}",
             default_options.multipv, MAX_MULTIPV
         );
-        println!(
-            "option name Minimal type check default {}",
-            default_options.minimal
-        );
+        println!("option name Minimal type check default {}", default_options.minimal);
         println!(
             "option name MoveOverhead type spin default {} min 0 max {}",
             default_options.move_overhead_ms, MAX_MOVE_OVERHEAD_MS
@@ -296,10 +293,7 @@ impl TeiHandler {
                 self.key_history.clear();
             }
             "tps" => {
-                let count = args
-                    .iter()
-                    .position(|&s| s == "moves")
-                    .unwrap_or(args.len());
+                let count = args.iter().position(|&s| s == "moves").unwrap_or(args.len());
 
                 if count == 0 {
                     eprintln!("Warning: Missing TPS");
@@ -478,10 +472,7 @@ impl TeiHandler {
                             }
 
                             if !self.pos.is_legal(mv) {
-                                println!(
-                                    "info string excludemoves: Ignoring illegal move '{}'",
-                                    mv
-                                );
+                                println!("info string excludemoves: Ignoring illegal move '{}'", mv);
                             }
 
                             moves_to_exclude.insert(mv);
@@ -513,9 +504,7 @@ impl TeiHandler {
             limits.set_time_manager(our_time, our_inc, overhead, &self.pos);
         }
 
-        let max_depth = max_depth
-            .unwrap_or(search::MAX_DEPTH)
-            .clamp(1, search::MAX_DEPTH);
+        let max_depth = max_depth.unwrap_or(search::MAX_DEPTH).clamp(1, search::MAX_DEPTH);
 
         self.searcher.start_search(
             &self.pos,
@@ -564,11 +553,7 @@ impl TeiHandler {
 
         let cp = score_to_cp(value);
 
-        println!(
-            "Value (white-relative): {:.6} ({})",
-            value,
-            cp as f64 / 100.0
-        );
+        println!("Value (white-relative): {:.6} ({})", value, cp as f64 / 100.0);
     }
 
     fn handle_eval(&self) {

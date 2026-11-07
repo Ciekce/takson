@@ -8,9 +8,9 @@ mod perft;
 mod position;
 mod prng;
 mod road;
+mod search;
 mod takmove;
 mod tei;
-mod search;
 mod value;
 
 fn main() {

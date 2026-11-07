@@ -304,10 +304,7 @@ impl Position {
 
         if parts.len() >= 3 {
             match parts[2].parse::<u16>() {
-                Ok(fullmove) => {
-                    pos.ply =
-                        (fullmove.max(1) - 1) * 2 + if pos.stm == Color::Black { 1 } else { 0 }
-                }
+                Ok(fullmove) => pos.ply = (fullmove.max(1) - 1) * 2 + if pos.stm == Color::Black { 1 } else { 0 },
                 Err(_) => return Err(TpsError::InvalidFullmove),
             }
         }
@@ -362,11 +359,7 @@ impl Position {
     #[inline(always)]
     pub fn colors_for(&self, sq: Square, color: Color) -> u64 {
         let colors = self.colors(sq);
-        let colors = if color == Color::White {
-            !colors
-        } else {
-            colors
-        };
+        let colors = if color == Color::White { !colors } else { colors };
         colors & ((1u64 << self.height(sq)) - 1)
     }
 
@@ -407,8 +400,7 @@ impl Position {
 
     #[must_use]
     pub fn cap_sq(&self, color: Color) -> Option<Square> {
-        self.color_piece_bb(PieceType::Capstone.with_color(color))
-            .lsb()
+        self.color_piece_bb(PieceType::Capstone.with_color(color)).lsb()
     }
 
     #[must_use]
@@ -481,9 +473,7 @@ impl Position {
 
     #[must_use]
     pub fn count_flats(&self) -> FlatCountOutcome {
-        if !(!self.occ()).is_empty()
-            && !self.has_no_more_pieces(Color::White)
-            && !self.has_no_more_pieces(Color::Black)
+        if !(!self.occ()).is_empty() && !self.has_no_more_pieces(Color::White) && !self.has_no_more_pieces(Color::Black)
         {
             return FlatCountOutcome::None;
         }
@@ -624,8 +614,7 @@ impl Position {
             debug_assert_eq!(new_color_bbs[0] & new_color_bbs[1], Bitboard::empty());
 
             for color in 0..Color::COUNT {
-                self.colors[color] =
-                    (self.colors[color] | new_color_bbs[color]) & !new_color_bbs[color ^ 0x1];
+                self.colors[color] = (self.colors[color] | new_color_bbs[color]) & !new_color_bbs[color ^ 0x1];
             }
 
             self.pieces[top.piece_type()].set_sq(sq);
@@ -642,21 +631,14 @@ impl Position {
             self.update_influence(Color::Black);
 
             debug_assert_eq!(
-                self.pieces[PieceType::Flat]
-                    & self.pieces[PieceType::Wall]
-                    & self.pieces[PieceType::Capstone],
+                self.pieces[PieceType::Flat] & self.pieces[PieceType::Wall] & self.pieces[PieceType::Capstone],
                 Bitboard::empty()
             );
 
-            debug_assert_eq!(
-                self.colors[Color::White] & self.colors[Color::Black],
-                Bitboard::empty()
-            );
+            debug_assert_eq!(self.colors[Color::White] & self.colors[Color::Black], Bitboard::empty());
 
             debug_assert_eq!(
-                self.pieces[PieceType::Flat]
-                    | self.pieces[PieceType::Wall]
-                    | self.pieces[PieceType::Capstone],
+                self.pieces[PieceType::Flat] | self.pieces[PieceType::Wall] | self.pieces[PieceType::Capstone],
                 self.colors[Color::White] | self.colors[Color::Black]
             );
         } else {
@@ -715,11 +697,7 @@ impl Position {
                 if self.stacks.is_empty(sq) {
                     let mut empty = 1;
 
-                    while file < 5
-                        && self
-                            .stacks
-                            .is_empty(Square::from_file_rank(file + 1, rank).unwrap())
-                    {
+                    while file < 5 && self.stacks.is_empty(Square::from_file_rank(file + 1, rank).unwrap()) {
                         file += 1;
                         empty += 1;
                     }

@@ -231,11 +231,7 @@ pub fn shift_right_i32<const SHIFT: i32>(mut a: VecI32) -> VecI32 {
 #[must_use]
 #[inline(always)]
 pub fn dpbusd_i32(mut sum: VecI32, a: VecU8, b: VecI8) -> VecI32 {
-    for ((sum, a), b) in sum
-        .iter_mut()
-        .zip(a.as_chunks::<4>().0)
-        .zip(b.as_chunks::<4>().0)
-    {
+    for ((sum, a), b) in sum.iter_mut().zip(a.as_chunks::<4>().0).zip(b.as_chunks::<4>().0) {
         for (&a, &b) in a.iter().zip(b) {
             *sum = sum.wrapping_add(i32::from(a) * i32::from(b));
         }
@@ -251,19 +247,9 @@ pub fn dpbusdx2_i32(sum: VecI32, a_1: VecU8, b_1: VecI8, a_2: VecU8, b_2: VecI8)
 
 #[must_use]
 #[inline(always)]
-pub fn dpwssdx2_i32(
-    mut acc: [VecI32; 2],
-    a_1: VecI16,
-    b_1: VecI16,
-    a_2: VecI16,
-    b_2: VecI16,
-) -> [VecI32; 2] {
+pub fn dpwssdx2_i32(mut acc: [VecI32; 2], a_1: VecI16, b_1: VecI16, a_2: VecI16, b_2: VecI16) -> [VecI32; 2] {
     for (acc, (a, b)) in acc.iter_mut().zip([(a_1, b_1), (a_2, b_2)]) {
-        for ((sum, a), b) in acc
-            .iter_mut()
-            .zip(a.as_chunks::<2>().0)
-            .zip(b.as_chunks::<2>().0)
-        {
+        for ((sum, a), b) in acc.iter_mut().zip(a.as_chunks::<2>().0).zip(b.as_chunks::<2>().0) {
             for (&a, &b) in a.iter().zip(b) {
                 *sum = sum.wrapping_add(i32::from(a) * i32::from(b));
             }

@@ -104,8 +104,7 @@ impl Searcher {
         self.construct_root(root_pos, moves_to_search, moves_to_exclude);
 
         self.key_history.clear();
-        self.key_history
-            .reserve(new_key_history.len() + MAX_DEPTH as usize);
+        self.key_history.reserve(new_key_history.len() + MAX_DEPTH as usize);
         self.key_history.extend_from_slice(new_key_history);
 
         let mut iters = 0usize;
@@ -241,12 +240,7 @@ impl Searcher {
         first_best_child.unwrap()
     }
 
-    fn construct_root(
-        &mut self,
-        root_pos: &Position,
-        moves_to_search: &[Move],
-        moves_to_exclude: &HashSet<Move>,
-    ) {
+    fn construct_root(&mut self, root_pos: &Position, moves_to_search: &[Move], moves_to_exclude: &HashSet<Move>) {
         self.tree.push(Default::default());
 
         let mut moves = Vec::new();
@@ -291,11 +285,7 @@ impl Searcher {
             for child_idx in node.children() {
                 let child = &self.tree[child_idx];
 
-                let q = if child.visits == 0 {
-                    FPU
-                } else {
-                    1.0 - child.q()
-                };
+                let q = if child.visits == 0 { FPU } else { 1.0 - child.q() };
                 let puct = q + e * p / (1 + child.visits) as f32;
 
                 if puct > best_child_puct {
@@ -313,11 +303,9 @@ impl Searcher {
     fn expand(&mut self, node_idx: u32) -> bool {
         assert!(!self.tree[node_idx as usize].is_terminal());
 
-        if let Some(terminal_state) = check_terminal_state(
-            &self.key_history,
-            &self.pos,
-            self.tree[node_idx as usize].mv.unwrap(),
-        ) {
+        if let Some(terminal_state) =
+            check_terminal_state(&self.key_history, &self.pos, self.tree[node_idx as usize].mv.unwrap())
+        {
             let node = &mut self.tree[node_idx as usize];
             node.result = Some(terminal_state);
             return true;
@@ -333,8 +321,7 @@ impl Searcher {
         let first_child_idx = self.tree.len() as u32;
 
         for &mv in moves.iter() {
-            self.tree
-                .push(Node::new(self.tree.len() as u32, node_idx, mv));
+            self.tree.push(Node::new(self.tree.len() as u32, node_idx, mv));
         }
 
         let node = &mut self.tree[node_idx as usize];
@@ -421,11 +408,7 @@ impl TerminalState {
 }
 
 // returns wins/losses from the perspective of the *position after the move*
-fn check_terminal_state(
-    key_history: &[u64],
-    pos: &Position,
-    prev_move: Move,
-) -> Option<TerminalState> {
+fn check_terminal_state(key_history: &[u64], pos: &Position, prev_move: Move) -> Option<TerminalState> {
     // player we care about: the one that made the move
     let stm = pos.stm().flip();
 

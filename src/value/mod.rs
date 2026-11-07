@@ -135,12 +135,9 @@ pub fn eval_value(pos: &Position) -> f32 {
                 let ft_vec_1 = unsafe { set1_u8x4(ft_groups.add(i_1 * 4)) };
 
                 for (j, intermediate) in intermediate.iter_mut().enumerate() {
-                    let weights_0 =
-                        unsafe { load_i8(w.add(i_0 * L2_SIZE * 4 + j * CHUNK_SIZE_I8)) };
-                    let weights_1 =
-                        unsafe { load_i8(w.add(i_1 * L2_SIZE * 4 + j * CHUNK_SIZE_I8)) };
-                    *intermediate =
-                        dpbusdx2_i32(*intermediate, ft_vec_0, weights_0, ft_vec_1, weights_1);
+                    let weights_0 = unsafe { load_i8(w.add(i_0 * L2_SIZE * 4 + j * CHUNK_SIZE_I8)) };
+                    let weights_1 = unsafe { load_i8(w.add(i_1 * L2_SIZE * 4 + j * CHUNK_SIZE_I8)) };
+                    *intermediate = dpbusdx2_i32(*intermediate, ft_vec_0, weights_0, ft_vec_1, weights_1);
                 }
             }
         }
@@ -181,13 +178,9 @@ pub fn eval_value(pos: &Position) -> f32 {
             let l1_vec_0 = unsafe { set1_i16x2(l1_pairs.add(i * 2)) };
             let l1_vec_1 = unsafe { set1_i16x2(l1_pairs.add((i + 1) * 2)) };
             for (j, intermediate) in l2_intermediate.iter_mut().enumerate() {
-                let l2_weight_0 =
-                    unsafe { load_i16(l2_weights.add((i * L3_SIZE + j * CHUNK_SIZE_I32) * 2)) };
-                let l2_weight_1 = unsafe {
-                    load_i16(l2_weights.add(((i + 1) * L3_SIZE + j * CHUNK_SIZE_I32) * 2))
-                };
-                *intermediate =
-                    dpwssdx2_i32(*intermediate, l1_vec_0, l2_weight_0, l1_vec_1, l2_weight_1);
+                let l2_weight_0 = unsafe { load_i16(l2_weights.add((i * L3_SIZE + j * CHUNK_SIZE_I32) * 2)) };
+                let l2_weight_1 = unsafe { load_i16(l2_weights.add(((i + 1) * L3_SIZE + j * CHUNK_SIZE_I32) * 2)) };
+                *intermediate = dpwssdx2_i32(*intermediate, l1_vec_0, l2_weight_0, l1_vec_1, l2_weight_1);
             }
         }
     }
@@ -261,9 +254,8 @@ fn accumulate(pos: &Position) -> [i16; L1_SIZE] {
 
         for depth in 0..count {
             let color = Color::from_raw((colors & 0x1) as u8).unwrap();
-            rows.adds.push(
-                &NET.ftw_stack[stack_feature_idx(perspective, top, color, depth, perspective_sq)],
-            );
+            rows.adds
+                .push(&NET.ftw_stack[stack_feature_idx(perspective, top, color, depth, perspective_sq)]);
             colors >>= 1;
         }
     }
@@ -292,10 +284,8 @@ fn top_feature_idx(perspective: Color, side: Color, pt: PieceType, sq: Square) -
 #[must_use]
 fn stack_feature_idx(perspective: Color, top: Piece, side: Color, depth: u8, sq: Square) -> usize {
     debug_assert!(depth < 12);
-    let top_idx =
-        usize::from(top.color() != perspective) * PieceType::COUNT + top.piece_type().idx();
-    ((top_idx * Color::COUNT + usize::from(side != perspective)) * Square::COUNT + sq.idx()) * 12
-        + depth as usize
+    let top_idx = usize::from(top.color() != perspective) * PieceType::COUNT + top.piece_type().idx();
+    ((top_idx * Color::COUNT + usize::from(side != perspective)) * Square::COUNT + sq.idx()) * 12 + depth as usize
 }
 
 #[must_use]
@@ -333,8 +323,7 @@ impl Updates {
         let paired = self.adds.len().min(self.subs.len());
 
         for offset in (0..L1_SIZE).step_by(UPDATE_CHUNK) {
-            let mut chunk: [i16; UPDATE_CHUNK] =
-                src[offset..offset + UPDATE_CHUNK].try_into().unwrap();
+            let mut chunk: [i16; UPDATE_CHUNK] = src[offset..offset + UPDATE_CHUNK].try_into().unwrap();
 
             for (&add, &sub) in self.adds.iter().zip(self.subs.iter()) {
                 for ((v, add), sub) in chunk.iter_mut().zip(&add[offset..]).zip(&sub[offset..]) {

@@ -212,13 +212,7 @@ pub fn dpbusdx2_i32(sum: VecI32, a_1: VecU8, b_1: VecI8, a_2: VecU8, b_2: VecI8)
 
 #[must_use]
 #[inline(always)]
-pub fn dpwssdx2_i32(
-    acc: [VecI32; 2],
-    a_1: VecI16,
-    b_1: VecI16,
-    a_2: VecI16,
-    b_2: VecI16,
-) -> [VecI32; 2] {
+pub fn dpwssdx2_i32(acc: [VecI32; 2], a_1: VecI16, b_1: VecI16, a_2: VecI16, b_2: VecI16) -> [VecI32; 2] {
     cfg_select! {
         target_feature = "avx512vnni" => unsafe {
             [
