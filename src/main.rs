@@ -1,5 +1,6 @@
 mod bitboard;
 mod core;
+mod eval;
 mod hits;
 mod keys;
 mod limit;
@@ -11,7 +12,6 @@ mod road;
 mod search;
 mod takmove;
 mod tei;
-mod value;
 
 fn main() {
     tei::run();

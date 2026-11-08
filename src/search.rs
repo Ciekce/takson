@@ -1,9 +1,10 @@
+use crate::eval::policy::PolicyContext;
+use crate::eval::value::eval_value;
 use crate::limit::Limits;
 use crate::movegen::generate_moves;
 use crate::position::{FlatCountOutcome, Position};
 use crate::takmove::Move;
 use crate::tei::{TeiOptions, score_to_cp};
-use crate::value::eval_value;
 use arrayvec::ArrayVec;
 use std::collections::HashSet;
 use std::ops::Range;
@@ -98,7 +99,7 @@ impl Searcher {
         moves_to_exclude: &HashSet<Move>,
         _options: &TeiOptions,
     ) {
-        const REPORT_INTERVAL: usize = 8192;
+        const REPORT_INTERVAL: usize = 32768;
 
         self.tree.clear();
         self.construct_root(root_pos, moves_to_search, moves_to_exclude);
@@ -170,11 +171,11 @@ impl Searcher {
                 false => "n/a".to_string(),
             };
             println!(
-                "info string {} V: {}, Q: {} P: {}",
+                "info string {} V: {}, Q: {} P: {}%",
                 node.mv.unwrap(),
                 node.visits,
                 q,
-                node.policy
+                node.policy * 100.0
             );
             total_visits += node.visits;
         }
@@ -269,12 +270,15 @@ impl Searcher {
         let mut moves = Vec::new();
         get_root_moves(&mut moves, root_pos, moves_to_search, moves_to_exclude);
 
+        let policy_ctx = PolicyContext::new(&self.pos);
         for &mv in moves.iter() {
-            let policy = self.get_policy(root_pos, mv);
+            let policy = self.get_policy(&policy_ctx, root_pos, mv);
             self.tree.push(Node::new(self.tree.len() as u32, 0, mv, policy));
         }
 
         self.normalize_policy(1..self.tree.len());
+
+        self.tree[1..].sort_by(|a, b| b.policy.partial_cmp(&a.policy).unwrap());
 
         let root = &mut self.tree[0];
         root.first_child_idx = 1;
@@ -346,8 +350,9 @@ impl Searcher {
 
         let first_child_idx = self.tree.len() as u32;
 
+        let policy_ctx = PolicyContext::new(&self.pos);
         for &mv in moves.iter() {
-            let policy = self.get_policy(&self.pos, mv);
+            let policy = self.get_policy(&policy_ctx, &self.pos, mv);
             self.tree.push(Node::new(self.tree.len() as u32, node_idx, mv, policy));
         }
 
@@ -391,7 +396,7 @@ impl Searcher {
         }
     }
 
-    fn get_policy(&self, pos: &Position, mv: Move) -> f32 {
+    fn get_policy(&self, ctx: &PolicyContext, pos: &Position, mv: Move) -> f32 {
         let mut new_pos = *pos;
         new_pos.apply_move(mv);
 
@@ -408,8 +413,7 @@ impl Searcher {
             }
         }
 
-        let value = 1.0 - eval_value(&new_pos);
-        2.0 * (value / (1.0 - value)).ln()
+        ctx.get(mv)
     }
 
     fn normalize_policy(&mut self, nodes: Range<usize>) {
