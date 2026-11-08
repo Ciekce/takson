@@ -400,6 +400,8 @@ impl Searcher {
     }
 
     fn get_policy(&self, ctx: &PolicyContext, pos: &Position, mv: Move) -> f32 {
+        const PST: f32 = 2.0;
+
         let mut new_pos = *pos;
         new_pos.apply_move(mv);
 
@@ -420,7 +422,7 @@ impl Searcher {
             let value = 1.0 - eval_value(&new_pos);
             2.0 * (value / (1.0 - value)).ln()
         } else {
-            ctx.get(mv)
+            ctx.get(mv) / PST
         }
     }
 
