@@ -284,7 +284,7 @@ impl Searcher {
         let mut moves = Vec::new();
         get_root_moves(&mut moves, root_pos, moves_to_search, moves_to_exclude);
 
-        let policy_ctx = PolicyContext::new(&self.pos);
+        let policy_ctx = PolicyContext::new(&root_pos);
         for &mv in moves.iter() {
             let policy = self.get_policy(&policy_ctx, root_pos, mv, true);
             self.tree.push(Node::new(self.tree.len() as u32, 0, mv, policy));
