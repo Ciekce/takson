@@ -581,7 +581,7 @@ impl TeiHandler {
         moves.sort_by(|a, b| b.1.total_cmp(&a.1));
 
         for (mv, policy) in moves {
-            println!("{} {}", mv, policy);
+            println!("{} {}%", mv, policy * 100.0);
         }
     }
 
