@@ -65,7 +65,7 @@ pub struct Searcher {
     tree: Vec<Node>,
     pos: Position,
     key_history: Vec<u64>,
-    selection_depth: u32,
+    selection_depth: i32,
 }
 
 impl Searcher {
@@ -96,12 +96,12 @@ impl Searcher {
         new_key_history: &[u64],
         start_time: Instant,
         limits: Limits,
-        _max_depth: i32,
+        max_depth: i32,
         moves_to_search: &[Move],
         moves_to_exclude: &HashSet<Move>,
         options: &TeiOptions,
     ) {
-        const REPORT_INTERVAL: usize = 32768;
+        const MAX_REPORT_INTERVAL: usize = 32768;
 
         self.options = *options;
 
@@ -114,8 +114,8 @@ impl Searcher {
 
         let mut iters = 0usize;
 
-        let mut total_depth = 0;
-        let mut max_depth = 0;
+        let mut depth_total = 0;
+        let mut depth_max = 0;
 
         let mut average_depth = 0;
 
@@ -140,26 +140,28 @@ impl Searcher {
 
             iters += 1;
 
-            if limits.should_stop(iters) {
+            depth_total += self.selection_depth as u64;
+            depth_max = depth_max.max(self.selection_depth);
+
+            let new_average_depth = (depth_total as f64 / iters as f64).round() as i32;
+            let should_report_depth = new_average_depth > average_depth;
+
+            average_depth = average_depth.max(new_average_depth);
+
+            if average_depth >= max_depth || limits.should_stop(iters) {
                 break;
             }
 
-            total_depth += self.selection_depth as u64;
-            max_depth = max_depth.max(self.selection_depth);
-
-            let new_average_depth = (total_depth as f64 / iters as f64).round() as u32;
-
-            if (iter_idx - last_report_iter).is_multiple_of(REPORT_INTERVAL) || new_average_depth > average_depth {
-                average_depth = average_depth.max(new_average_depth);
-                self.report(start_time, iters, average_depth, max_depth);
+            if should_report_depth || (iter_idx - last_report_iter).is_multiple_of(MAX_REPORT_INTERVAL) {
+                self.report(start_time, iters, average_depth, depth_max);
                 last_report_iter = iter_idx;
             }
         }
 
-        self.final_report(start_time, iters, average_depth, max_depth);
+        self.final_report(start_time, iters, average_depth, depth_max);
     }
 
-    fn final_report(&self, start_time: Instant, iters: usize, depth: u32, seldepth: u32) {
+    fn final_report(&self, start_time: Instant, iters: usize, depth: i32, seldepth: i32) {
         let first_best_child = self.report(start_time, iters, depth, seldepth);
         assert_ne!(first_best_child.idx, 0);
 
@@ -188,7 +190,7 @@ impl Searcher {
         println!("bestmove {}", first_best_child.mv.unwrap());
     }
 
-    fn report(&self, start_time: Instant, iters: usize, depth: u32, seldepth: u32) -> &Node {
+    fn report(&self, start_time: Instant, iters: usize, depth: i32, seldepth: i32) -> &Node {
         let mut pv = ArrayVec::new();
         let first_best_child = self.build_pv(&mut pv);
 
