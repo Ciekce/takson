@@ -32,6 +32,7 @@ static NET: Network = unsafe { std::mem::transmute(*include_bytes!(env!("POLICYF
 pub struct PolicyContext {
     activations: Align64<[u8; L1_SIZE]>,
     transform: Transform,
+    ply: u16,
 }
 
 impl PolicyContext {
@@ -52,6 +53,7 @@ impl PolicyContext {
         Self {
             activations: activated_ft,
             transform,
+            ply: pos.ply(),
         }
     }
 
@@ -61,7 +63,10 @@ impl PolicyContext {
         let weights = NET.l1w[idx].iter().zip(&self.activations.0);
         let sum: i32 = weights.map(|(&w, &a)| i32::from(w) * i32::from(a)).sum();
         let out = sum + NET.l1b[idx];
-        out as f32 / DIVISOR
+        match self.ply < 2 {
+            true => -out as f32 / DIVISOR,
+            false => out as f32 / DIVISOR,
+        }
     }
 
     fn move_idx(&self, mv: Move) -> usize {
