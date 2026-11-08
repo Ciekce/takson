@@ -61,6 +61,7 @@ impl Node {
 }
 
 pub struct Searcher {
+    options: TeiOptions,
     tree: Vec<Node>,
     pos: Position,
     key_history: Vec<u64>,
@@ -72,6 +73,7 @@ impl Searcher {
     pub fn new(tree_size_mib: usize) -> Self {
         let node_count = tree_size_mib * 1024 * 1024 / size_of::<Node>();
         Self {
+            options: Default::default(),
             tree: Vec::with_capacity(node_count),
             pos: Position::startpos(),
             key_history: Vec::with_capacity(1024),
@@ -97,9 +99,11 @@ impl Searcher {
         _max_depth: i32,
         moves_to_search: &[Move],
         moves_to_exclude: &HashSet<Move>,
-        _options: &TeiOptions,
+        options: &TeiOptions,
     ) {
         const REPORT_INTERVAL: usize = 32768;
+
+        self.options = *options;
 
         self.tree.clear();
         self.construct_root(root_pos, moves_to_search, moves_to_exclude);
@@ -412,7 +416,12 @@ impl Searcher {
             }
         }
 
-        ctx.get(mv)
+        if self.options.value_policy {
+            let value = 1.0 - eval_value(&new_pos);
+            2.0 * (value / (1.0 - value)).ln()
+        } else {
+            ctx.get(mv)
+        }
     }
 
     fn normalize_policy(&mut self, nodes: Range<usize>) {

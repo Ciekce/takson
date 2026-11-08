@@ -36,6 +36,7 @@ pub struct TeiOptions {
     pub minimal: bool,
     pub silent: bool,
     pub move_overhead_ms: u64,
+    pub value_policy: bool,
 }
 
 impl Default for TeiOptions {
@@ -45,6 +46,7 @@ impl Default for TeiOptions {
             minimal: false,
             silent: false,
             move_overhead_ms: 10,
+            value_policy: false,
         }
     }
 }
@@ -148,6 +150,10 @@ impl TeiHandler {
             default_options.move_overhead_ms, MAX_MOVE_OVERHEAD_MS
         );
         println!("option name DoubleBlackStack type check default false");
+        println!(
+            "option name ValuePolicy type check default {}",
+            default_options.value_policy
+        );
 
         println!("teiok");
     }
@@ -268,6 +274,13 @@ impl TeiHandler {
             "doubleblackstack" => {
                 if let Ok(double_black_stack) = value.parse::<bool>() {
                     DOUBLE_BLACK_STACK.store(double_black_stack, Ordering::Relaxed);
+                }
+            }
+            "valuepolicy" => {
+                if let Ok(value_policy) = value.parse::<bool>() {
+                    self.options.value_policy = value_policy;
+                } else {
+                    invalid(&value);
                 }
             }
             unknown => {
