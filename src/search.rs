@@ -146,11 +146,10 @@ impl Searcher {
             let new_average_depth = (total_depth as f64 / iters as f64).round() as u32;
 
             if (iter_idx - last_report_iter).is_multiple_of(REPORT_INTERVAL) || new_average_depth > average_depth {
-                self.report(start_time, iters, new_average_depth, max_depth);
+                average_depth = average_depth.max(new_average_depth);
+                self.report(start_time, iters, average_depth, max_depth);
                 last_report_iter = iter_idx;
             }
-
-            average_depth = average_depth.max(new_average_depth);
         }
 
         self.final_report(start_time, iters, average_depth, max_depth);
