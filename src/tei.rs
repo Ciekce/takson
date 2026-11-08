@@ -1,10 +1,12 @@
 use crate::core::Color;
+use crate::eval::policy::PolicyContext;
+use crate::eval::value::eval_value;
 use crate::limit::{Limits, MAX_MOVE_OVERHEAD_MS};
+use crate::movegen::generate_moves;
 use crate::perft::{perft, split_perft};
 use crate::position::*;
 use crate::search;
 use crate::search::{DEFAULT_TREE_SIZE_MIB, MAX_TREE_SIZE_MIB, Searcher};
-use crate::value::eval_value;
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
@@ -108,6 +110,7 @@ impl TeiHandler {
                 "move" => self.handle_move(args),
                 "d" => self.handle_d(),
                 "eval" => self.handle_eval(),
+                "policy" => self.handle_policy(),
                 "perft" => self.handle_perft(args),
                 "splitperft" => self.handle_splitperft(args),
                 "quit" => break,
@@ -560,6 +563,26 @@ impl TeiHandler {
         let value = eval_value(&self.pos);
         let cp = score_to_cp(value);
         println!("Value (stm-relative): {:.6} ({})", value, cp as f64 / 100.0);
+    }
+
+    fn handle_policy(&self) {
+        let ctx = PolicyContext::new(&self.pos);
+
+        let mut moves = Vec::new();
+        generate_moves(&mut moves, &self.pos);
+
+        let mut moves: Vec<_> = moves.iter().map(|&mv| (mv, ctx.get(mv))).collect();
+
+        let max = moves.iter().map(|&(_, policy)| policy).reduce(f32::max).unwrap();
+        moves.iter_mut().for_each(|(_, policy)| *policy = (*policy - max).exp());
+        let total = moves.iter().map(|&(_, policy)| policy).sum::<f32>();
+        moves.iter_mut().for_each(|(_, policy)| *policy /= total);
+
+        moves.sort_by(|a, b| b.1.total_cmp(&a.1));
+
+        for (mv, policy) in moves {
+            println!("{} {}", mv, policy);
+        }
     }
 
     fn handle_perft(&self, args: &[&str]) {

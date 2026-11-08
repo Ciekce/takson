@@ -1,42 +1,16 @@
-use crate::core::{Color, Piece, PieceType, Square, normalizer};
+use super::simd::*;
+use crate::core::{Color, normalizer};
+use crate::eval::*;
 use crate::position::Position;
-use arrayvec::ArrayVec;
-use simd::*;
-
-cfg_select! {
-    all(target_feature = "avx512f", target_feature = "avx512bw") => {
-        #[path = "simd/avx512.rs"]
-        pub(super) mod simd;
-    }
-    target_feature = "avx2" => {
-        #[path = "simd/avx2.rs"]
-        pub(super) mod simd;
-    }
-    target_feature = "sse4.1" => {
-        #[path = "simd/sse41.rs"]
-        pub(super) mod simd;
-    }
-    all(target_arch = "aarch64", target_feature = "neon") => {
-        #[path = "simd/neon.rs"]
-        pub(super) mod simd;
-    }
-    all(target_arch = "wasm32", target_feature = "simd128") => {
-        #[path = "simd/wasm.rs"]
-        pub(super) mod simd;
-    }
-    _ => {
-        #[path = "simd/scalar.rs"]
-        pub(super) mod simd;
-    }
-}
-
-const TOP_INPUT_SIZE: usize = Color::COUNT * PieceType::COUNT * Square::COUNT;
-const STACK_INPUT_SIZE: usize = 12 * Color::COUNT * PieceType::COUNT * Square::COUNT * Color::COUNT;
-const RESERVES_INPUT_SIZE: usize = 30 * Color::COUNT;
 
 const L1_SIZE: usize = 2560;
 const L2_SIZE: usize = 32;
 const L3_SIZE: usize = 32;
+
+#[cfg(target_feature = "avx512f")]
+const UPDATE_CHUNK: usize = L1_SIZE / 4;
+#[cfg(not(target_feature = "avx512f"))]
+const UPDATE_CHUNK: usize = 256;
 
 const L1_PAIR_COUNT: usize = L1_SIZE / 2;
 const L2_PAIR_COUNT: usize = L2_SIZE / 2;
@@ -45,7 +19,6 @@ const RESERVE_BUCKET_COUNT: usize = 8;
 const KOMI_BUCKET_COUNT: usize = (Position::MAX_HALF_KOMI - Position::MIN_HALF_KOMI) as usize + 1;
 const OUTPUT_BUCKET_COUNT: usize = KOMI_BUCKET_COUNT * RESERVE_BUCKET_COUNT;
 
-const Q0: i32 = 255;
 const Q: i32 = 64;
 
 const Q0_BITS: i32 = 8;
@@ -68,59 +41,18 @@ struct Network {
 
 static NET: Network = unsafe { std::mem::transmute(*include_bytes!(env!("EVALFILE"))) };
 
-#[repr(C, align(64))]
-struct Align64<T>(T);
-
-const PACKUS_LANE: usize = 8;
-const PACKUS_WIDTH: usize = 32;
-
-const fn packus_position(neuron: usize) -> usize {
-    let chunk = neuron % (2 * PACKUS_WIDTH);
-    let lane = chunk / (2 * PACKUS_LANE);
-    let half = chunk % (2 * PACKUS_LANE) / PACKUS_LANE;
-    neuron - chunk + half * PACKUS_WIDTH + lane * PACKUS_LANE + chunk % PACKUS_LANE
-}
-
-const EXPLICIT_MULHI_SHIFT_UP: i32 = 7;
-const IMPLIED_MULHI_SHIFT_DOWN: i32 = 16;
-const MULHI_SHIFT: i32 = EXPLICIT_MULHI_SHIFT_UP - IMPLIED_MULHI_SHIFT_DOWN;
-
 const SHIFT: i32 = Q0_BITS * 2 + MULHI_SHIFT + Q1_BITS - Q_BITS;
 
 const L2_UNROLL: usize = 8 / (L2_SIZE / CHUNK_SIZE_I32);
 
 #[must_use]
 pub fn eval_value(pos: &Position) -> f32 {
-    let acc = accumulate(pos);
-
     let output_bucket = calc_output_bucket(pos);
 
+    let acc = accumulate(pos);
+
     let mut activated_ft = Align64([0; L1_PAIR_COUNT]);
-    {
-        let lo = zero_i16();
-        let hi = set1_i16(Q0 as i16);
-
-        let values = acc.as_ptr();
-        let out = activated_ft.0.as_mut_ptr();
-
-        let activate = |offset: usize| {
-            let a = unsafe { load_i16(values.add(offset)) };
-            let b = unsafe { load_i16(values.add(offset + L1_PAIR_COUNT)) };
-
-            let a = min_i16(max_i16(a, lo), hi);
-            let b = min_i16(b, hi);
-
-            mulhi_shift_i16::<EXPLICIT_MULHI_SHIFT_UP>(a, b)
-        };
-
-        for i in (0..L1_PAIR_COUNT).step_by(2 * CHUNK_SIZE_I16) {
-            let offset_1 = packus_position(i);
-            let offset_2 = packus_position(i + PACKUS_LANE);
-            let p = packus_i16(activate(offset_1), activate(offset_2));
-            unsafe { store_u8(out.add(i), p) };
-        }
-    }
-    debug_assert!(activated_ft.0.iter().all(|&e| e <= i8::MAX as u8));
+    activate_ft::<L1_SIZE, L1_PAIR_COUNT>(&mut activated_ft.0, &acc.0);
 
     let mut l1_intermediate = [[zero_i32(); L2_SIZE / CHUNK_SIZE_I32]; L2_UNROLL];
     {
@@ -221,14 +153,14 @@ pub fn eval_value(pos: &Position) -> f32 {
 }
 
 #[must_use]
-fn accumulate(pos: &Position) -> [i16; L1_SIZE] {
-    let mut acc = [0; L1_SIZE];
+fn accumulate(pos: &Position) -> Align64<[i16; L1_SIZE]> {
+    let mut acc = Align64([0; L1_SIZE]);
 
     let perspective = pos.stm();
 
     let transform = normalizer(pos.cap_sq(perspective));
 
-    let mut rows = Updates::default();
+    let mut rows = Updates::<L1_SIZE, UPDATE_CHUNK>::default();
 
     for side in [Color::White, Color::Black] {
         for sq in pos.color_bb(side) {
@@ -271,26 +203,9 @@ fn accumulate(pos: &Position) -> [i16; L1_SIZE] {
             .push(&NET.ftw_reserves[reserves_feature_idx(perspective, color, reserves)]);
     }
 
-    rows.apply(&mut acc, &NET.ftb);
+    rows.apply(&mut acc.0, &NET.ftb);
 
     acc
-}
-
-#[must_use]
-fn top_feature_idx(perspective: Color, side: Color, pt: PieceType, sq: Square) -> usize {
-    (usize::from(side != perspective) * PieceType::COUNT + pt.idx()) * Square::COUNT + sq.idx()
-}
-
-#[must_use]
-fn stack_feature_idx(perspective: Color, top: Piece, side: Color, depth: u8, sq: Square) -> usize {
-    debug_assert!(depth < 12);
-    let top_idx = usize::from(top.color() != perspective) * PieceType::COUNT + top.piece_type().idx();
-    ((top_idx * Color::COUNT + usize::from(side != perspective)) * Square::COUNT + sq.idx()) * 12 + depth as usize
-}
-
-#[must_use]
-fn reserves_feature_idx(perspective: Color, side: Color, reserves: u8) -> usize {
-    usize::from(side != perspective) * 30 + (reserves as usize - 1)
 }
 
 #[must_use]
@@ -304,46 +219,4 @@ fn calc_output_bucket(pos: &Position) -> usize {
     let stm_komi = i32::from(pos.half_komi()) * pos.stm().sign();
     let komi_bucket = (-stm_komi - i32::from(Position::MIN_HALF_KOMI)) as usize;
     komi_bucket * RESERVE_BUCKET_COUNT + bucket
-}
-
-#[cfg(target_feature = "avx512f")]
-const UPDATE_CHUNK: usize = L1_SIZE / 4;
-#[cfg(not(target_feature = "avx512f"))]
-const UPDATE_CHUNK: usize = 256;
-const MAX_UPDATE_ROWS: usize = 128;
-
-#[derive(Default)]
-struct Updates {
-    adds: ArrayVec<&'static [i16; L1_SIZE], MAX_UPDATE_ROWS>,
-    subs: ArrayVec<&'static [i16; L1_SIZE], MAX_UPDATE_ROWS>,
-}
-
-impl Updates {
-    fn apply(&self, dst: &mut [i16; L1_SIZE], src: &[i16; L1_SIZE]) {
-        let paired = self.adds.len().min(self.subs.len());
-
-        for offset in (0..L1_SIZE).step_by(UPDATE_CHUNK) {
-            let mut chunk: [i16; UPDATE_CHUNK] = src[offset..offset + UPDATE_CHUNK].try_into().unwrap();
-
-            for (&add, &sub) in self.adds.iter().zip(self.subs.iter()) {
-                for ((v, add), sub) in chunk.iter_mut().zip(&add[offset..]).zip(&sub[offset..]) {
-                    *v += *add - *sub;
-                }
-            }
-
-            for &add in &self.adds[paired..] {
-                for (v, add) in chunk.iter_mut().zip(&add[offset..]) {
-                    *v += *add;
-                }
-            }
-
-            for &sub in &self.subs[paired..] {
-                for (v, sub) in chunk.iter_mut().zip(&sub[offset..]) {
-                    *v -= *sub;
-                }
-            }
-
-            dst[offset..offset + UPDATE_CHUNK].copy_from_slice(&chunk);
-        }
-    }
 }
