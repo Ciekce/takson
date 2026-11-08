@@ -275,7 +275,7 @@ impl Searcher {
 
         let policy_ctx = PolicyContext::new(&self.pos);
         for &mv in moves.iter() {
-            let policy = self.get_policy(&policy_ctx, root_pos, mv);
+            let policy = self.get_policy(&policy_ctx, root_pos, mv, true);
             self.tree.push(Node::new(self.tree.len() as u32, 0, mv, policy));
         }
 
@@ -355,7 +355,7 @@ impl Searcher {
 
         let policy_ctx = PolicyContext::new(&self.pos);
         for &mv in moves.iter() {
-            let policy = self.get_policy(&policy_ctx, &self.pos, mv);
+            let policy = self.get_policy(&policy_ctx, &self.pos, mv, false);
             self.tree.push(Node::new(self.tree.len() as u32, node_idx, mv, policy));
         }
 
@@ -399,7 +399,8 @@ impl Searcher {
         }
     }
 
-    fn get_policy(&self, ctx: &PolicyContext, pos: &Position, mv: Move) -> f32 {
+    fn get_policy(&self, ctx: &PolicyContext, pos: &Position, mv: Move, root: bool) -> f32 {
+        const ROOT_PST: f32 = 3.0;
         const PST: f32 = 2.0;
 
         let mut new_pos = *pos;
@@ -418,11 +419,13 @@ impl Searcher {
             }
         }
 
+        let pst = if root { ROOT_PST } else { PST };
+
         if self.options.value_policy {
             let value = 1.0 - eval_value(&new_pos);
-            2.0 * (value / (1.0 - value)).ln()
+            4.0 * (value / (1.0 - value)).ln() / pst
         } else {
-            ctx.get(mv) / PST
+            ctx.get(mv) / pst
         }
     }
 
