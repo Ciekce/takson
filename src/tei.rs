@@ -37,6 +37,7 @@ pub struct TeiOptions {
     pub silent: bool,
     pub move_overhead_ms: u64,
     pub value_policy: bool,
+    pub report_root_stats: bool,
 }
 
 impl Default for TeiOptions {
@@ -47,6 +48,7 @@ impl Default for TeiOptions {
             silent: false,
             move_overhead_ms: 10,
             value_policy: false,
+            report_root_stats: false,
         }
     }
 }
@@ -153,6 +155,10 @@ impl TeiHandler {
         println!(
             "option name ValuePolicy type check default {}",
             default_options.value_policy
+        );
+        println!(
+            "option name ReportRootStats type check default {}",
+            default_options.report_root_stats
         );
 
         println!("teiok");
@@ -279,6 +285,13 @@ impl TeiHandler {
             "valuepolicy" => {
                 if let Ok(value_policy) = value.parse::<bool>() {
                     self.options.value_policy = value_policy;
+                } else {
+                    invalid(&value);
+                }
+            }
+            "reportrootstats" => {
+                if let Ok(report_root_stats) = value.parse::<bool>() {
+                    self.options.report_root_stats = report_root_stats;
                 } else {
                     invalid(&value);
                 }

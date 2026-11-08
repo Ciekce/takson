@@ -129,7 +129,9 @@ impl Searcher {
             self.selection_depth = 0;
 
             let Some(leaf) = self.select_expand() else {
-                println!("info string Tree full, stopping");
+                if !options.silent && !options.minimal {
+                    println!("info string Tree full, stopping");
+                }
                 break;
             };
 
@@ -152,40 +154,47 @@ impl Searcher {
                 break;
             }
 
-            if should_report_depth || (iter_idx - last_report_iter).is_multiple_of(MAX_REPORT_INTERVAL) {
+            if !options.silent
+                && !options.minimal
+                && (should_report_depth || (iter_idx - last_report_iter).is_multiple_of(MAX_REPORT_INTERVAL))
+            {
                 self.report(start_time, iters, average_depth, depth_max);
                 last_report_iter = iter_idx;
             }
         }
 
-        self.final_report(start_time, iters, average_depth, depth_max);
+        if !options.silent {
+            self.final_report(start_time, iters, average_depth, depth_max);
+        }
     }
 
     fn final_report(&self, start_time: Instant, iters: usize, depth: i32, seldepth: i32) {
         let first_best_child = self.report(start_time, iters, depth, seldepth);
         assert_ne!(first_best_child.idx, 0);
 
-        println!();
-        let root = &self.tree[0];
-        println!("info string root V: {} Q: {}", root.visits, root.q());
-        let mut total_visits = 0;
-        for child_idx in self.tree[0].children() {
-            let node = &self.tree[child_idx];
-            let q = match node.visits > 0 {
-                true => (1.0 - node.q()).to_string(),
-                false => "n/a".to_string(),
-            };
-            println!(
-                "info string {} V: {}, Q: {} P: {}%",
-                node.mv.unwrap(),
-                node.visits,
-                q,
-                node.policy * 100.0
-            );
-            total_visits += node.visits;
+        if self.options.report_root_stats && !self.options.silent && !self.options.minimal {
+            println!();
+            let root = &self.tree[0];
+            println!("info string root V: {} Q: {}", root.visits, root.q());
+            for child_idx in self.tree[0].children() {
+                let node = &self.tree[child_idx];
+                let q = match node.visits > 0 {
+                    true => (1.0 - node.q()).to_string(),
+                    false => "n/a".to_string(),
+                };
+                println!(
+                    "info string {} V: {}, Q: {} P: {}%",
+                    node.mv.unwrap(),
+                    node.visits,
+                    q,
+                    node.policy * 100.0
+                );
+            }
+            println!();
         }
-        assert_eq!(total_visits, root.visits);
-        println!();
+
+        let child_visits: usize = self.tree[0].children().map(|idx| self.tree[idx].visits).sum();
+        assert_eq!(child_visits, self.tree[0].visits);
 
         println!("bestmove {}", first_best_child.mv.unwrap());
     }
