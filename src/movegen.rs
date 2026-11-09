@@ -2,14 +2,17 @@ use crate::core::{Direction, PieceType, Square};
 use crate::hits::find_hits;
 use crate::position::Position;
 use crate::takmove::Move;
+use arrayvec::ArrayVec;
 
-fn generate_starting_moves(dst: &mut Vec<Move>, pos: &Position) {
+pub type MoveList = ArrayVec<Move, 2048>;
+
+fn generate_starting_moves(dst: &mut MoveList, pos: &Position) {
     for sq in !pos.occ() {
         dst.push(Move::placement(PieceType::Flat, sq));
     }
 }
 
-fn generate_placements(dst: &mut Vec<Move>, pos: &Position) {
+fn generate_placements(dst: &mut MoveList, pos: &Position) {
     let flats = pos.flats_in_hand(pos.stm());
     let caps = pos.caps_in_hand(pos.stm());
 
@@ -29,7 +32,7 @@ fn generate_placements(dst: &mut Vec<Move>, pos: &Position) {
     }
 }
 
-fn do_spreads(dst: &mut Vec<Move>, sq: Square, dir: Direction, lsb: u16, mut pattern: u16, dist: u32, limit: u16) {
+fn do_spreads(dst: &mut MoveList, sq: Square, dir: Direction, lsb: u16, mut pattern: u16, dist: u32, limit: u16) {
     assert!(dist > 0);
     while pattern < limit {
         dst.push(Move::spread(sq, dir, pattern));
@@ -41,7 +44,7 @@ fn do_spreads(dst: &mut Vec<Move>, sq: Square, dir: Direction, lsb: u16, mut pat
     }
 }
 
-fn generate_spreads(dst: &mut Vec<Move>, pos: &Position) {
+fn generate_spreads(dst: &mut MoveList, pos: &Position) {
     for sq in pos.color_bb(pos.stm()) {
         let top_pt = pos.top_pt(sq).unwrap();
         let max = pos.height(sq).min(6);
@@ -91,7 +94,7 @@ fn generate_spreads(dst: &mut Vec<Move>, pos: &Position) {
     }
 }
 
-pub fn generate_moves(dst: &mut Vec<Move>, pos: &Position) {
+pub fn generate_moves(dst: &mut MoveList, pos: &Position) {
     dst.clear();
 
     if pos.ply() < 2 {

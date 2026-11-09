@@ -1,9 +1,9 @@
-use crate::movegen::generate_moves;
+use crate::movegen::{MoveList, generate_moves};
 use crate::position::Position;
 use crate::takmove::Move;
 use std::time::Instant;
 
-fn do_perft(pos: &Position, depth: i32, movelists: &mut [Vec<Move>]) -> usize {
+fn do_perft(pos: &Position, depth: i32, movelists: &mut [MoveList]) -> usize {
     if depth <= 0 {
         return 1;
     }
@@ -30,14 +30,14 @@ fn do_perft(pos: &Position, depth: i32, movelists: &mut [Vec<Move>]) -> usize {
 
 #[must_use]
 pub fn perft(pos: &Position, depth: i32) -> usize {
-    let mut movelists = vec![Vec::with_capacity(256); depth as usize];
+    let mut movelists = vec![MoveList::new(); depth as usize];
     do_perft(pos, depth.max(1), &mut movelists)
 }
 
 pub fn split_perft(pos: &Position, depth: i32) {
     let depth = depth.max(1);
 
-    let mut movelists = vec![Vec::with_capacity(256); depth as usize];
+    let mut movelists = vec![MoveList::new(); depth as usize];
 
     let start = Instant::now();
 

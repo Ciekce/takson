@@ -1,7 +1,7 @@
 use crate::eval::policy::PolicyContext;
 use crate::eval::value::eval_value;
 use crate::limit::Limits;
-use crate::movegen::generate_moves;
+use crate::movegen::{MoveList, generate_moves};
 use crate::position::{FlatCountOutcome, Position};
 use crate::takmove::Move;
 use crate::tei::{TeiOptions, score_to_cp};
@@ -281,7 +281,7 @@ impl Searcher {
     fn construct_root(&mut self, root_pos: &Position, moves_to_search: &[Move], moves_to_exclude: &HashSet<Move>) {
         self.tree.push(Default::default());
 
-        let mut moves = Vec::new();
+        let mut moves = MoveList::new();
         get_root_moves(&mut moves, root_pos, moves_to_search, moves_to_exclude);
 
         let policy_ctx = PolicyContext::new(&root_pos);
@@ -355,7 +355,7 @@ impl Searcher {
         assert!(!self.tree[node_idx as usize].is_terminal());
         assert_eq!(self.tree[node_idx as usize].child_count, 0);
 
-        let mut moves = Vec::new();
+        let mut moves = MoveList::new();
         generate_moves(&mut moves, &self.pos);
 
         if self.tree.len() + moves.len() > self.tree.capacity() {
@@ -458,7 +458,7 @@ impl Searcher {
 }
 
 fn get_root_moves(
-    moves: &mut Vec<Move>,
+    moves: &mut MoveList,
     root_pos: &Position,
     moves_to_search: &[Move],
     moves_to_exclude: &HashSet<Move>,
@@ -471,7 +471,7 @@ fn get_root_moves(
         }
         println!();
 
-        moves.extend_from_slice(moves_to_search);
+        moves.try_extend_from_slice(moves_to_search).unwrap();
     } else {
         generate_moves(moves, root_pos);
     }

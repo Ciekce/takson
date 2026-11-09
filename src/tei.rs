@@ -2,7 +2,7 @@ use crate::core::Color;
 use crate::eval::policy::PolicyContext;
 use crate::eval::value::eval_value;
 use crate::limit::{Limits, MAX_MOVE_OVERHEAD_MS};
-use crate::movegen::generate_moves;
+use crate::movegen::{MoveList, generate_moves};
 use crate::perft::{perft, split_perft};
 use crate::position::*;
 use crate::search;
@@ -594,7 +594,7 @@ impl TeiHandler {
     fn handle_policy(&self) {
         let ctx = PolicyContext::new(&self.pos);
 
-        let mut moves = Vec::new();
+        let mut moves = MoveList::new();
         generate_moves(&mut moves, &self.pos);
 
         let mut moves: Vec<_> = moves.iter().map(|&mv| (mv, ctx.get(mv))).collect();
