@@ -652,7 +652,7 @@ impl TeiHandler {
             None => DEFAULT_BENCH_DEPTH,
         };
 
-        let mut searcher = Searcher::new(512);
+        let mut searcher = Searcher::new(128);
         let exclude = HashSet::new();
 
         let options = TeiOptions {
