@@ -65,6 +65,7 @@ pub struct Searcher {
     tree: Vec<Node>,
     pos: Position,
     key_history: Vec<u64>,
+    iters: usize,
     selection_depth: i32,
 }
 
@@ -77,6 +78,7 @@ impl Searcher {
             tree: Vec::with_capacity(node_count),
             pos: Position::startpos(),
             key_history: Vec::with_capacity(1024),
+            iters: 0,
             selection_depth: 0,
         }
     }
@@ -87,6 +89,11 @@ impl Searcher {
 
         let node_count = size_mib * 1024 * 1024 / size_of::<Node>();
         self.tree = Vec::with_capacity(node_count);
+    }
+
+    #[must_use]
+    pub fn total_nodes(&self) -> usize {
+        self.iters
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -112,7 +119,7 @@ impl Searcher {
         self.key_history.reserve(new_key_history.len() + MAX_DEPTH as usize);
         self.key_history.extend_from_slice(new_key_history);
 
-        let mut iters = 0usize;
+        self.iters = 0;
 
         let mut depth_total = 0;
         let mut depth_max = 0;
@@ -122,7 +129,7 @@ impl Searcher {
         let mut last_report_iter = 0;
 
         loop {
-            let iter_idx = iters;
+            let iter_idx = self.iters;
 
             self.pos = *root_pos;
             self.key_history.truncate(new_key_history.len());
@@ -140,17 +147,17 @@ impl Searcher {
             let u = self.simulate(leaf);
             self.backprop(leaf, u);
 
-            iters += 1;
+            self.iters += 1;
 
             depth_total += self.selection_depth as u64;
             depth_max = depth_max.max(self.selection_depth);
 
-            let new_average_depth = (depth_total as f64 / iters as f64).round() as i32;
+            let new_average_depth = (depth_total as f64 / self.iters as f64).round() as i32;
             let should_report_depth = new_average_depth > average_depth;
 
             average_depth = average_depth.max(new_average_depth);
 
-            if average_depth >= max_depth || limits.should_stop(iters) {
+            if average_depth >= max_depth || limits.should_stop(self.iters) {
                 break;
             }
 
@@ -158,13 +165,13 @@ impl Searcher {
                 && !options.minimal
                 && (should_report_depth || (iter_idx - last_report_iter).is_multiple_of(MAX_REPORT_INTERVAL))
             {
-                self.report(start_time, iters, average_depth, depth_max);
+                self.report(start_time, self.iters, average_depth, depth_max);
                 last_report_iter = iter_idx;
             }
         }
 
         if !options.silent {
-            self.final_report(start_time, iters, average_depth, depth_max);
+            self.final_report(start_time, self.iters, average_depth, depth_max);
         }
     }
 
