@@ -1,7 +1,8 @@
-use crate::core::{Color, Piece, PieceType, Square};
+use crate::core::{Color, Piece, PieceType, Square, normalizer};
 use crate::eval::simd::{
     CHUNK_SIZE_I16, load_i16, max_i16, min_i16, mulhi_shift_i16, packus_i16, set1_i16, store_u8, zero_i16,
 };
+use crate::position::Position;
 use arrayvec::ArrayVec;
 
 pub mod policy;
@@ -53,6 +54,14 @@ fn stack_feature_idx(perspective: Color, top: Piece, side: Color, depth: u8, sq:
 #[must_use]
 fn reserves_feature_idx(perspective: Color, side: Color, reserves: u8) -> usize {
     usize::from(side != perspective) * 30 + (reserves as usize - 1)
+}
+
+#[repr(C, align(64))]
+struct FeatureTransformer<const L1_SIZE: usize> {
+    w_top: [[i16; L1_SIZE]; TOP_INPUT_SIZE],
+    w_stack: [[i16; L1_SIZE]; STACK_INPUT_SIZE],
+    w_reserves: [[i16; L1_SIZE]; RESERVES_INPUT_SIZE],
+    b: [i16; L1_SIZE],
 }
 
 #[repr(C, align(64))]
@@ -141,5 +150,56 @@ impl<const L1_SIZE: usize, const UPDATE_CHUNK: usize> Updates<L1_SIZE, UPDATE_CH
 
             dst[offset..offset + UPDATE_CHUNK].copy_from_slice(&chunk);
         }
+    }
+}
+
+fn gather_rows<const L1_SIZE: usize, const UPDATE_CHUNK: usize>(
+    rows: &mut Updates<L1_SIZE, UPDATE_CHUNK>,
+    ft: &'static FeatureTransformer<L1_SIZE>,
+    pos: &Position,
+) {
+    let perspective = pos.stm();
+
+    let transform = normalizer(pos.cap_sq(perspective));
+
+    for side in [Color::White, Color::Black] {
+        for sq in pos.color_bb(side) {
+            let perspective_sq = sq.transform(transform);
+            let pt = pos.top_pt(sq).unwrap();
+            rows.adds
+                .push(&ft.w_top[top_feature_idx(perspective, side, pt, perspective_sq)]);
+        }
+    }
+
+    for sq in pos.occ() {
+        let height = pos.height(sq);
+
+        if height == 1 {
+            continue;
+        }
+
+        let top = pos.top(sq).unwrap();
+        let perspective_sq = sq.transform(transform);
+
+        let mut colors = pos.colors(sq) >> 1;
+        let count = height.min(13) - 1;
+
+        for depth in 0..count {
+            let color = Color::from_raw((colors & 0x1) as u8).unwrap();
+            rows.adds
+                .push(&ft.w_stack[stack_feature_idx(perspective, top, color, depth, perspective_sq)]);
+            colors >>= 1;
+        }
+    }
+
+    for color in [Color::White, Color::Black] {
+        let reserves = pos.flats_in_hand(color);
+
+        if reserves == 0 {
+            continue;
+        }
+
+        rows.adds
+            .push(&ft.w_reserves[reserves_feature_idx(perspective, color, reserves)]);
     }
 }
