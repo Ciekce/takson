@@ -50,11 +50,11 @@ const BENCH_POSITIONS: [&str; 25] = [
 pub fn score_to_cp(score: f32) -> i32 {
     const CP_SCALE: f32 = 160.0;
     match score {
-        0.0 => -30000,
-        1.0 => 30000,
+        0.0 => -25000,
+        1.0 => 25000,
         _ => {
             let cp = CP_SCALE * (score / (1.0 - score)).ln();
-            cp.clamp(-29999.0, 29999.0).round() as i32
+            cp.clamp(-24999.0, 24999.0).round() as i32
         }
     }
 }
@@ -63,6 +63,7 @@ pub fn score_to_cp(score: f32) -> i32 {
 pub struct TeiOptions {
     pub multipv: usize,
     pub minimal: bool,
+    pub mate_scores: bool,
     pub silent: bool,
     pub move_overhead_ms: u64,
     pub value_policy: bool,
@@ -74,6 +75,7 @@ impl Default for TeiOptions {
         Self {
             multipv: 1,
             minimal: false,
+            mate_scores: true,
             silent: false,
             move_overhead_ms: 10,
             value_policy: false,
@@ -176,6 +178,10 @@ impl TeiHandler {
             default_options.multipv, MAX_MULTIPV
         );
         println!("option name Minimal type check default {}", default_options.minimal);
+        println!(
+            "option name MateScores type check default {}",
+            default_options.mate_scores
+        );
         println!(
             "option name MoveOverhead type spin default {} min 0 max {}",
             default_options.move_overhead_ms, MAX_MOVE_OVERHEAD_MS
@@ -294,6 +300,13 @@ impl TeiHandler {
             "minimal" => {
                 if let Ok(minimal) = value.parse::<bool>() {
                     self.options.minimal = minimal;
+                } else {
+                    invalid(&value);
+                }
+            }
+            "matescores" => {
+                if let Ok(mate_scores) = value.parse::<bool>() {
+                    self.options.mate_scores = mate_scores;
                 } else {
                     invalid(&value);
                 }
@@ -510,6 +523,8 @@ impl TeiHandler {
 
                             if !self.pos.is_legal(mv) {
                                 println!("info string searchmoves: Skipping illegal move '{}'", mv);
+                                i += 1;
+                                continue;
                             }
 
                             moves_to_search.push(mv);

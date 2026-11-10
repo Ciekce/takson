@@ -117,7 +117,12 @@ impl Node {
     #[must_use]
     fn q(&self) -> f32 {
         assert!(self.visits > 0);
-        (self.total_score / self.visits as f64) as f32
+        match self.state {
+            Some(GameState::Win(_)) => 1.0,
+            Some(GameState::Draw) => 0.5,
+            Some(GameState::Loss(_)) => 0.0,
+            _ => (self.total_score / self.visits as f64) as f32,
+        }
     }
 
     #[must_use]
@@ -270,6 +275,10 @@ impl Searcher {
 
             average_depth = average_depth.max(new_average_depth);
 
+            if self.tree[self.active_half][0].is_terminal() {
+                break;
+            }
+
             if average_depth >= max_depth || limits.should_stop(self.iters) {
                 break;
             }
@@ -295,19 +304,28 @@ impl Searcher {
         if self.options.report_root_stats && !self.options.silent && !self.options.minimal {
             println!();
             let root = &self.tree[self.active_half][0];
-            println!("info string root V: {} Q: {}", root.visits, root.q());
+            let state = match root.state {
+                Some(state) if state != GameState::Ongoing => format!(" S: {:?}", state),
+                _ => "".to_string(),
+            };
+            println!("info string root V: {} Q: {}{}", root.visits, root.q(), state);
             for child_idx in self.tree[self.active_half][0].children() {
                 let node = &self.tree[self.active_half][child_idx.idx()];
                 let q = match node.visits > 0 {
                     true => (1.0 - node.q()).to_string(),
                     false => "n/a".to_string(),
                 };
+                let state = match node.state {
+                    Some(state) if state != GameState::Ongoing => format!(" S: {:?}", state.flip()),
+                    _ => "".to_string(),
+                };
                 println!(
-                    "info string {} V: {}, Q: {} P: {}%",
+                    "info string {} V: {}, Q: {} P: {}%{}",
                     node.mv.unwrap(),
                     node.visits,
                     q,
-                    node.policy * 100.0
+                    node.policy * 100.0,
+                    state
                 );
             }
             println!();
@@ -330,13 +348,20 @@ impl Searcher {
 
         let time = start_time.elapsed().as_secs_f64();
         let [w, d, l] = [score, 0.0, 1.0 - score].map(|score| (score * 1000.0).round() as i32);
-        let cp = score_to_cp(score);
 
         let capacity = self.tree[self.active_half].capacity();
         let filled = self.tree[self.active_half].len() as f64 / capacity as f64;
 
+        let score = match first_best_child.state {
+            Some(GameState::Loss(plies)) if self.options.mate_scores => format!("mate {}", (plies + 2) / 2),
+            Some(GameState::Win(plies)) if self.options.mate_scores => format!("mate {}", -(plies + 1) / 2),
+            Some(GameState::Loss(plies)) if !self.options.mate_scores => format!("cp {}", 30000 - plies),
+            Some(GameState::Win(plies)) if !self.options.mate_scores => format!("cp {}", -30000 + plies),
+            _ => format!("cp {}", score_to_cp(score)),
+        };
+
         print!(
-            "info depth {depth} seldepth {seldepth} time {} nodes {} nps {} score cp {cp} wdl {w} {d} {l} hashfull {} pv",
+            "info depth {depth} seldepth {seldepth} time {} nodes {} nps {} score {score} wdl {w} {d} {l} hashfull {} pv",
             (time * 1000.0) as usize,
             iters,
             (iters as f64 / time) as usize,
@@ -368,7 +393,12 @@ impl Searcher {
                     continue;
                 }
 
-                let q = 1.0 - child.q();
+                let q = 1.0 - match child.state {
+                    Some(GameState::Win(plies)) => 1000.0 - plies as f32,
+                    Some(GameState::Loss(plies)) => -1000.0 + plies as f32,
+                    _ => child.q(),
+                };
+
                 if q > best_child_q {
                     best_child_idx = child_idx;
                     best_child_q = q;
@@ -470,11 +500,20 @@ impl Searcher {
             let fpu = if curr.is_root() { 1000.0 } else { FPU };
             let e = CPUCT * (node.visits as f32).sqrt();
 
+            let mut proven_loss = true;
+            let mut longest_loss = i16::MIN;
+
             let mut best_child = Default::default();
             let mut best_child_puct = f32::NEG_INFINITY;
 
             for child_idx in node.children() {
                 let child = &self.tree[self.active_half][child_idx.idx()];
+
+                if let Some(GameState::Win(plies)) = child.state {
+                    longest_loss = longest_loss.max(plies);
+                } else {
+                    proven_loss = false;
+                }
 
                 let q = if child.visits == 0 { fpu } else { 1.0 - child.q() };
                 let puct = q + e * child.policy / (1 + child.visits) as f32;
@@ -485,8 +524,14 @@ impl Searcher {
                 }
             }
 
+            if proven_loss {
+                self.tree[self.active_half][curr.idx()].state = Some(GameState::Loss(longest_loss + 1));
+            }
+
             curr = best_child;
         }
+
+        assert!(!curr.is_root());
 
         curr
     }
@@ -536,9 +581,15 @@ impl Searcher {
 
     fn backprop(&mut self, mut node_idx: NodeIndex, mut u: f32) {
         assert!(!node_idx.is_root());
+        let mut child_state = GameState::Ongoing;
         loop {
             assert_eq!(node_idx.half(), self.active_half);
             let node = &mut self.tree[self.active_half][node_idx.idx()];
+
+            if let GameState::Loss(plies) = child_state {
+                assert!(!matches!(node.state, Some(GameState::Loss(_))));
+                node.state = Some(GameState::Win(plies + 1));
+            }
 
             node.visits += 1;
             node.total_score += u as f64;
@@ -549,6 +600,7 @@ impl Searcher {
 
             node_idx = node.parent;
             u = 1.0 - u;
+            child_state = node.state.unwrap();
         }
     }
 
@@ -680,25 +732,34 @@ fn get_root_moves(
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum GameState {
-    Win,
+    Win(i16),
     Draw,
-    Loss,
+    Loss(i16),
     Ongoing,
 }
 
 impl GameState {
     #[must_use]
     fn is_terminal(self) -> bool {
-        self != Self::Ongoing
+        matches!(self, Self::Win(0) | Self::Loss(0))
     }
 
     #[must_use]
     fn u(self) -> Option<f32> {
         match self {
-            Self::Win => Some(1.0),
+            Self::Win(_) => Some(1.0),
             Self::Draw => Some(0.5),
-            Self::Loss => Some(0.0),
+            Self::Loss(_) => Some(0.0),
             Self::Ongoing => None,
+        }
+    }
+
+    #[must_use]
+    fn flip(self) -> Self {
+        match self {
+            Self::Win(plies) => Self::Loss(plies),
+            Self::Loss(plies) => Self::Win(plies),
+            _ => self,
         }
     }
 }
@@ -709,18 +770,18 @@ fn check_game_state(key_history: &[u64], pos: &Position, prev_move: Move) -> Gam
     let stm = pos.stm().flip();
 
     if pos.has_road(stm) {
-        return GameState::Loss;
+        return GameState::Loss(0);
     }
 
     if pos.has_road(stm.flip()) {
-        return GameState::Win;
+        return GameState::Win(0);
     }
 
     match pos.count_flats() {
         FlatCountOutcome::None => {}
         FlatCountOutcome::Draw => return GameState::Draw,
         FlatCountOutcome::Win(color) => {
-            return if color == stm { GameState::Loss } else { GameState::Win };
+            return if color == stm { GameState::Loss(0) } else { GameState::Win(0) };
         }
     }
 
