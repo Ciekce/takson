@@ -743,7 +743,7 @@ enum GameState {
 impl GameState {
     #[must_use]
     fn is_terminal(self) -> bool {
-        matches!(self, Self::Win(0) | Self::Loss(0))
+        matches!(self, Self::Win(0) | Self::Loss(0) | Self::Draw)
     }
 
     #[must_use]
