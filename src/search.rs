@@ -393,10 +393,10 @@ impl Searcher {
                     continue;
                 }
 
-                let q = 1.0 - match child.state {
-                    Some(GameState::Win(plies)) => 1000.0 - plies as f32,
-                    Some(GameState::Loss(plies)) => -1000.0 + plies as f32,
-                    _ => child.q(),
+                let q = match child.state {
+                    Some(GameState::Win(plies)) => -1000.0 + plies as f32,
+                    Some(GameState::Loss(plies)) => 1000.0 - plies as f32,
+                    _ => 1.0 - child.q(),
                 };
 
                 if q > best_child_q {
@@ -781,7 +781,11 @@ fn check_game_state(key_history: &[u64], pos: &Position, prev_move: Move) -> Gam
         FlatCountOutcome::None => {}
         FlatCountOutcome::Draw => return GameState::Draw,
         FlatCountOutcome::Win(color) => {
-            return if color == stm { GameState::Loss(0) } else { GameState::Win(0) };
+            return if color == stm {
+                GameState::Loss(0)
+            } else {
+                GameState::Win(0)
+            };
         }
     }
 
