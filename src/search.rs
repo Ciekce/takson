@@ -458,7 +458,6 @@ impl Searcher {
     #[must_use]
     fn select_expand(&mut self) -> NodeIndex {
         const CPUCT: f32 = 1.5;
-        const FPU: f32 = 0.5;
 
         let mut curr = self.active_half.root();
         loop {
@@ -497,7 +496,7 @@ impl Searcher {
 
             let node = &self.tree[self.active_half][curr.idx()];
 
-            let fpu = if curr.is_root() { 1000.0 } else { FPU };
+            let fpu = if curr.is_root() { 1000.0 } else { node.q() };
             let e = CPUCT * (node.visits as f32).sqrt();
 
             let mut proven_loss = true;
