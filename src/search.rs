@@ -500,7 +500,7 @@ impl Searcher {
             let cpuct = if curr.is_root() { ROOT_CPUCT } else { CPUCT };
             let fpu = if curr.is_root() { 1000.0 } else { node.q() };
 
-            let e = cpuct * (node.visits as f32).sqrt();
+            let e = cpuct * (node.visits as f32).sqrt() * (1.0 + ((node.visits as f32 + 8192.0) / 8192.0).ln());
 
             let mut proven_loss = true;
             let mut longest_loss = i16::MIN;
