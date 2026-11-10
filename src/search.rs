@@ -7,7 +7,8 @@ use crate::takmove::Move;
 use crate::tei::{TeiOptions, score_to_cp};
 use arrayvec::ArrayVec;
 use std::collections::HashSet;
-use std::ops::Range;
+use std::ops::{Index, IndexMut, Range};
+use std::slice::SliceIndex;
 use std::time::Instant;
 
 pub const MAX_DEPTH: i32 = 255;
@@ -15,22 +16,96 @@ pub const MAX_DEPTH: i32 = 255;
 pub const DEFAULT_TREE_SIZE_MIB: usize = 16;
 pub const MAX_TREE_SIZE_MIB: usize = 131072;
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u8)]
+enum TreeHalf {
+    A = 0,
+    B = 1,
+}
+
+impl TreeHalf {
+    #[must_use]
+    pub const fn root(self) -> NodeIndex {
+        NodeIndex::new(self, 0)
+    }
+
+    pub const fn flip(self) -> Self {
+        match self {
+            Self::A => Self::B,
+            Self::B => Self::A,
+        }
+    }
+}
+
+impl<T> Index<TreeHalf> for [T; 2] {
+    type Output = T;
+
+    fn index(&self, index: TreeHalf) -> &Self::Output {
+        // SAFETY: only implemented for arrays of the correct length
+        unsafe { self.get_unchecked(index as usize) }
+    }
+}
+
+impl<T> IndexMut<TreeHalf> for [T; 2] {
+    fn index_mut(&mut self, index: TreeHalf) -> &mut Self::Output {
+        // SAFETY: only implemented for arrays of the correct length
+        unsafe { self.get_unchecked_mut(index as usize) }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+struct NodeIndex {
+    inner: u32,
+}
+
+impl NodeIndex {
+    const HALF_OFFSET: u32 = 31;
+    const HALF_MASK: u32 = 1 << Self::HALF_OFFSET;
+
+    #[must_use]
+    const fn new(half: TreeHalf, idx: u32) -> Self {
+        debug_assert!((idx & Self::HALF_MASK) == 0);
+        Self {
+            inner: ((half as u32) << Self::HALF_OFFSET) | idx,
+        }
+    }
+
+    #[must_use]
+    const fn half(self) -> TreeHalf {
+        match self.inner >> Self::HALF_OFFSET {
+            0 => TreeHalf::A,
+            1 => TreeHalf::B,
+            _ => unreachable!(),
+        }
+    }
+
+    #[must_use]
+    const fn idx(self) -> usize {
+        (self.inner & !Self::HALF_MASK) as usize
+    }
+
+    #[must_use]
+    const fn is_root(self) -> bool {
+        self.inner & !Self::HALF_MASK == 0
+    }
+}
+
 #[derive(Copy, Clone, Default, Debug)]
 struct Node {
-    idx: u32,
-    parent: u32,
+    idx: NodeIndex,
+    parent: NodeIndex,
     mv: Option<Move>,
     policy: f32,
     visits: usize,
     total_score: f64,
-    first_child_idx: u32,
+    first_child_idx: NodeIndex,
     child_count: u16,
     state: Option<GameState>,
 }
 
 impl Node {
     #[must_use]
-    fn new(idx: u32, parent: u32, mv: Move, policy: f32) -> Self {
+    fn new(idx: NodeIndex, parent: NodeIndex, mv: Move, policy: f32) -> Self {
         Self {
             idx,
             parent,
@@ -47,11 +122,12 @@ impl Node {
     }
 
     #[must_use]
-    fn children(&self) -> Range<usize> {
+    fn children(&self) -> ChildIterator {
         assert!(self.child_count > 0);
-        let start = self.first_child_idx as usize;
-        let end = start + self.child_count as usize;
-        start..end
+        let half = self.first_child_idx.half();
+        let start = self.first_child_idx.idx() as u32;
+        let end = start + self.child_count as u32;
+        ChildIterator { half, curr: start, end }
     }
 
     #[must_use]
@@ -60,11 +136,34 @@ impl Node {
     }
 }
 
+struct ChildIterator {
+    half: TreeHalf,
+    curr: u32,
+    end: u32,
+}
+
+impl Iterator for ChildIterator {
+    type Item = NodeIndex;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.curr < self.end {
+            let idx = NodeIndex::new(self.half, self.curr);
+            self.curr += 1;
+            Some(idx)
+        } else {
+            None
+        }
+    }
+}
+
 pub struct Searcher {
     options: TeiOptions,
-    tree: Vec<Node>,
+    active_half: TreeHalf,
+    tree: [Vec<Node>; 2],
+    root_pos: Position,
     pos: Position,
     key_history: Vec<u64>,
+    root_key_history_len: usize,
     iters: usize,
     selection_depth: i32,
 }
@@ -75,20 +174,34 @@ impl Searcher {
         let node_count = tree_size_mib * 1024 * 1024 / size_of::<Node>();
         Self {
             options: Default::default(),
-            tree: Vec::with_capacity(node_count),
+            active_half: TreeHalf::A,
+            tree: [Vec::with_capacity(node_count / 2), Vec::with_capacity(node_count / 2)],
+            root_pos: Position::startpos(),
             pos: Position::startpos(),
             key_history: Vec::with_capacity(1024),
+            root_key_history_len: 0,
             iters: 0,
             selection_depth: 0,
         }
     }
 
+    #[must_use]
+    fn get_free_node_idx(&self) -> NodeIndex {
+        let idx = self.tree[self.active_half].len() as u32;
+        NodeIndex::new(self.active_half, idx)
+    }
+
     pub fn set_tree_size(&mut self, size_mib: usize) {
-        self.tree.clear();
-        self.tree.shrink_to_fit();
+        for half in self.tree.iter_mut() {
+            half.clear();
+            half.shrink_to_fit();
+        }
 
         let node_count = size_mib * 1024 * 1024 / size_of::<Node>();
-        self.tree = Vec::with_capacity(node_count);
+
+        for half in self.tree.iter_mut() {
+            *half = Vec::with_capacity(node_count / 2);
+        }
     }
 
     #[must_use]
@@ -110,10 +223,17 @@ impl Searcher {
     ) {
         const MAX_REPORT_INTERVAL: usize = 32768;
 
+        self.root_pos = *root_pos;
+        self.root_key_history_len = new_key_history.len();
+
         self.options = *options;
 
-        self.tree.clear();
-        self.construct_root(root_pos, moves_to_search, moves_to_exclude);
+        self.active_half = TreeHalf::A;
+        for half in self.tree.iter_mut() {
+            half.clear();
+        }
+
+        self.construct_root(moves_to_search, moves_to_exclude);
 
         self.key_history.clear();
         self.key_history.reserve(new_key_history.len() + MAX_DEPTH as usize);
@@ -131,18 +251,12 @@ impl Searcher {
         loop {
             let iter_idx = self.iters;
 
-            self.pos = *root_pos;
-            self.key_history.truncate(new_key_history.len());
-            self.selection_depth = 0;
+            self.reset_selection();
 
-            let Some(leaf) = self.select_expand() else {
-                if !options.silent && !options.minimal {
-                    println!("info string Tree full, stopping");
-                }
-                break;
-            };
+            let leaf = self.select_expand();
 
-            assert_ne!(leaf, 0);
+            assert!(!leaf.is_root());
+            assert_eq!(leaf.half(), self.active_half);
 
             let u = self.simulate(leaf);
             self.backprop(leaf, u);
@@ -177,14 +291,14 @@ impl Searcher {
 
     fn final_report(&self, start_time: Instant, iters: usize, depth: i32, seldepth: i32) {
         let first_best_child = self.report(start_time, iters, depth, seldepth);
-        assert_ne!(first_best_child.idx, 0);
+        assert!(!first_best_child.idx.is_root());
 
         if self.options.report_root_stats && !self.options.silent && !self.options.minimal {
             println!();
-            let root = &self.tree[0];
+            let root = &self.tree[self.active_half][0];
             println!("info string root V: {} Q: {}", root.visits, root.q());
-            for child_idx in self.tree[0].children() {
-                let node = &self.tree[child_idx];
+            for child_idx in self.tree[self.active_half][0].children() {
+                let node = &self.tree[self.active_half][child_idx.idx()];
                 let q = match node.visits > 0 {
                     true => (1.0 - node.q()).to_string(),
                     false => "n/a".to_string(),
@@ -200,8 +314,11 @@ impl Searcher {
             println!();
         }
 
-        let child_visits: usize = self.tree[0].children().map(|idx| self.tree[idx].visits).sum();
-        assert_eq!(child_visits, self.tree[0].visits);
+        let child_visits: usize = self.tree[self.active_half][0]
+            .children()
+            .map(|idx| self.tree[self.active_half][idx.idx()].visits)
+            .sum();
+        assert_eq!(child_visits, self.tree[self.active_half][0].visits);
 
         println!("bestmove {}", first_best_child.mv.unwrap());
     }
@@ -216,8 +333,8 @@ impl Searcher {
         let [w, d, l] = [score, 0.0, 1.0 - score].map(|score| (score * 1000.0).round() as i32);
         let cp = score_to_cp(score);
 
-        let capacity = self.tree.capacity();
-        let filled = self.tree.len() as f64 / capacity as f64;
+        let capacity = self.tree[self.active_half].capacity();
+        let filled = self.tree[self.active_half].len() as f64 / capacity as f64;
 
         print!(
             "info depth {depth} seldepth {seldepth} time {} nodes {} nps {} score cp {cp} wdl {w} {d} {l} hashfull {} pv",
@@ -237,16 +354,16 @@ impl Searcher {
     }
 
     fn build_pv(&self, dst: &mut ArrayVec<Move, { MAX_DEPTH as usize }>) -> &Node {
-        let mut node = &self.tree[0];
+        let mut node = &self.tree[self.active_half][0];
 
         let mut first_best_child = None;
 
         loop {
-            let mut best_child_idx = 0;
+            let mut best_child_idx = self.active_half.root();
             let mut best_child_q = f32::NEG_INFINITY;
 
             for child_idx in node.children() {
-                let child = &self.tree[child_idx];
+                let child = &self.tree[child_idx.half()][child_idx.idx()];
 
                 if child.visits == 0 {
                     continue;
@@ -259,16 +376,16 @@ impl Searcher {
                 }
             }
 
-            if best_child_idx == 0 {
+            if best_child_idx.is_root() {
                 assert!(first_best_child.is_some());
                 break;
             }
 
-            let best_child = &self.tree[best_child_idx];
+            let best_child = &self.tree[best_child_idx.half()][best_child_idx.idx()];
 
             if first_best_child.is_none() {
-                assert_ne!(best_child_idx, 0);
-                first_best_child = Some(&self.tree[best_child_idx]);
+                assert!(!best_child_idx.is_root());
+                first_best_child = Some(&self.tree[best_child_idx.half()][best_child_idx.idx()]);
             }
 
             if dst.try_push(best_child.mv.unwrap()).is_err() {
@@ -285,63 +402,80 @@ impl Searcher {
         first_best_child.unwrap()
     }
 
-    fn construct_root(&mut self, root_pos: &Position, moves_to_search: &[Move], moves_to_exclude: &HashSet<Move>) {
-        self.tree.push(Default::default());
+    fn construct_root(&mut self, moves_to_search: &[Move], moves_to_exclude: &HashSet<Move>) {
+        self.tree[self.active_half].push(Default::default());
+
+        let root_idx = self.active_half.root();
 
         let mut moves = MoveList::new();
-        get_root_moves(&mut moves, root_pos, moves_to_search, moves_to_exclude);
+        get_root_moves(&mut moves, &self.root_pos, moves_to_search, moves_to_exclude);
 
-        let policy_ctx = PolicyContext::new(&root_pos);
+        let policy_ctx = PolicyContext::new(&self.root_pos);
         for &mv in moves.iter() {
-            let policy = self.get_policy(&policy_ctx, root_pos, mv, true);
-            self.tree.push(Node::new(self.tree.len() as u32, 0, mv, policy));
+            let idx = self.get_free_node_idx();
+            let policy = self.get_policy(&policy_ctx, &self.root_pos, mv, true);
+            self.tree[self.active_half].push(Node::new(idx, root_idx, mv, policy));
         }
 
-        self.normalize_policy(1..self.tree.len());
+        self.normalize_policy(1..self.tree[self.active_half].len());
 
-        self.tree[1..].sort_by(|a, b| b.policy.partial_cmp(&a.policy).unwrap());
+        self.tree[self.active_half][1..].sort_by(|a, b| b.policy.partial_cmp(&a.policy).unwrap());
 
-        let root = &mut self.tree[0];
-        root.first_child_idx = 1;
+        let root = &mut self.tree[self.active_half][0];
+        root.first_child_idx = NodeIndex::new(self.active_half, 1);
         root.child_count = moves.len() as u16;
     }
 
     #[must_use]
-    fn select_expand(&mut self) -> Option<u32> {
+    fn select_expand(&mut self) -> NodeIndex {
         const CPUCT: f32 = 1.5;
         const FPU: f32 = 0.5;
 
-        let mut curr = 0;
+        let mut curr = self.active_half.root();
         loop {
-            if curr != 0 {
+            if !curr.is_root() {
                 self.key_history.push(self.pos.key());
-                self.pos.apply_move(self.tree[curr].mv.unwrap());
+                self.pos.apply_move(self.tree[self.active_half][curr.idx()].mv.unwrap());
             }
 
-            if self.tree[curr].is_terminal() {
+            if self.tree[self.active_half][curr.idx()].is_terminal() {
                 break;
             }
 
-            if curr != 0 && self.tree[curr].visits == 1 && !self.expand(curr as u32) {
-                return None;
+            if !curr.is_root()
+                && self.tree[self.active_half][curr.idx()].child_count == 0
+                && self.tree[self.active_half][curr.idx()].visits > 0
+                && !self.expand(curr)
+            {
+                self.flip();
+                self.reset_selection();
+                curr = self.active_half.root();
+                continue;
             }
 
-            if self.tree[curr].child_count == 0 {
+            if self.tree[self.active_half][curr.idx()].child_count == 0 {
                 break;
+            }
+
+            if !self.copy_children_over(curr) {
+                self.flip();
+                self.reset_selection();
+                curr = self.active_half.root();
+                continue;
             }
 
             self.selection_depth += 1;
 
-            let node = &self.tree[curr];
+            let node = &self.tree[self.active_half][curr.idx()];
 
-            let fpu = if curr == 0 { 1000.0 } else { FPU };
+            let fpu = if curr.is_root() { 1000.0 } else { FPU };
             let e = CPUCT * (node.visits as f32).sqrt();
 
-            let mut best_child = 0;
+            let mut best_child = Default::default();
             let mut best_child_puct = f32::NEG_INFINITY;
 
             for child_idx in node.children() {
-                let child = &self.tree[child_idx];
+                let child = &self.tree[self.active_half][child_idx.idx()];
 
                 let q = if child.visits == 0 { fpu } else { 1.0 - child.q() };
                 let puct = q + e * child.policy / (1 + child.visits) as f32;
@@ -355,31 +489,32 @@ impl Searcher {
             curr = best_child;
         }
 
-        Some(curr as u32)
+        curr
     }
 
-    fn expand(&mut self, node_idx: u32) -> bool {
-        assert!(!self.tree[node_idx as usize].is_terminal());
-        assert_eq!(self.tree[node_idx as usize].child_count, 0);
+    fn expand(&mut self, node_idx: NodeIndex) -> bool {
+        assert!(!self.tree[self.active_half][node_idx.idx()].is_terminal());
+        assert_eq!(self.tree[self.active_half][node_idx.idx()].child_count, 0);
 
         let mut moves = MoveList::new();
         generate_moves(&mut moves, &self.pos);
 
-        if self.tree.len() + moves.len() > self.tree.capacity() {
+        if self.tree[self.active_half].len() + moves.len() > self.tree[self.active_half].capacity() {
             return false;
         }
 
-        let first_child_idx = self.tree.len() as u32;
+        let first_child_idx = self.get_free_node_idx();
 
         let policy_ctx = PolicyContext::new(&self.pos);
         for &mv in moves.iter() {
+            let idx = self.get_free_node_idx();
             let policy = self.get_policy(&policy_ctx, &self.pos, mv, false);
-            self.tree.push(Node::new(self.tree.len() as u32, node_idx, mv, policy));
+            self.tree[self.active_half].push(Node::new(idx, node_idx, mv, policy));
         }
 
-        self.normalize_policy(first_child_idx as usize..self.tree.len());
+        self.normalize_policy(first_child_idx.idx()..self.tree[self.active_half].len());
 
-        let node = &mut self.tree[node_idx as usize];
+        let node = &mut self.tree[self.active_half][node_idx.idx()];
         node.first_child_idx = first_child_idx;
         node.child_count = moves.len() as u16;
 
@@ -387,8 +522,8 @@ impl Searcher {
     }
 
     #[must_use]
-    fn simulate(&mut self, node_idx: u32) -> f32 {
-        let node = &mut self.tree[node_idx as usize];
+    fn simulate(&mut self, node_idx: NodeIndex) -> f32 {
+        let node = &mut self.tree[self.active_half][node_idx.idx()];
 
         if node.state.is_none() {
             let state = check_game_state(&self.key_history, &self.pos, node.mv.unwrap());
@@ -400,15 +535,16 @@ impl Searcher {
             .unwrap_or_else(|| eval_value(&self.pos))
     }
 
-    fn backprop(&mut self, mut node_idx: u32, mut u: f32) {
-        assert_ne!(node_idx, 0);
+    fn backprop(&mut self, mut node_idx: NodeIndex, mut u: f32) {
+        assert!(!node_idx.is_root());
         loop {
-            let node = &mut self.tree[node_idx as usize];
+            assert_eq!(node_idx.half(), self.active_half);
+            let node = &mut self.tree[self.active_half][node_idx.idx()];
 
             node.visits += 1;
             node.total_score += u as f64;
 
-            if node_idx == 0 {
+            if node_idx.is_root() {
                 break;
             }
 
@@ -448,7 +584,7 @@ impl Searcher {
     }
 
     fn normalize_policy(&mut self, nodes: Range<usize>) {
-        let nodes = &mut self.tree[nodes];
+        let nodes = &mut self.tree[self.active_half][nodes];
 
         let max = nodes.iter().map(|node| node.policy).reduce(f32::max).unwrap();
 
@@ -461,6 +597,53 @@ impl Searcher {
         for node in nodes.iter_mut() {
             node.policy /= total;
         }
+    }
+
+    fn flip(&mut self) {
+        for node in self.tree[self.active_half].iter_mut() {
+            if node.first_child_idx.half() != self.active_half {
+                node.child_count = 0;
+            }
+        }
+
+        self.active_half = self.active_half.flip();
+
+        let root = self.tree[self.active_half.flip()][0];
+
+        self.tree[self.active_half].clear();
+        self.tree[self.active_half].push(root);
+    }
+
+    fn reset_selection(&mut self) {
+        self.pos = self.root_pos;
+        self.key_history.truncate(self.root_key_history_len);
+        self.selection_depth = 0;
+    }
+
+    fn copy_children_over(&mut self, node_idx: NodeIndex) -> bool {
+        assert_eq!(node_idx.half(), self.active_half);
+
+        let node = &self.tree[self.active_half][node_idx.idx()];
+        if node.first_child_idx.half() == self.active_half {
+            return true;
+        }
+
+        if self.tree[self.active_half].len() + node.child_count as usize > self.tree[self.active_half].capacity() {
+            return false;
+        }
+
+        let first_child_idx = self.get_free_node_idx();
+
+        for child_idx in node.children() {
+            let mut node = self.tree[child_idx.half()][child_idx.idx()];
+            node.parent = node_idx;
+            node.idx = self.get_free_node_idx();
+            self.tree[self.active_half].push(node);
+        }
+
+        self.tree[self.active_half][node_idx.idx()].first_child_idx = first_child_idx;
+
+        true
     }
 }
 
