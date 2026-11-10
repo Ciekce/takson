@@ -165,6 +165,7 @@ pub struct Searcher {
     active_half: TreeHalf,
     tree: [Vec<Node>; 2],
     root_pos: Position,
+    reused_tree: bool,
     pos: Position,
     key_history: Vec<u64>,
     root_key_history_len: usize,
@@ -181,6 +182,7 @@ impl Searcher {
             active_half: TreeHalf::A,
             tree: [Vec::with_capacity(node_count / 2), Vec::with_capacity(node_count / 2)],
             root_pos: Position::startpos(),
+            reused_tree: false,
             pos: Position::startpos(),
             key_history: Vec::with_capacity(1024),
             root_key_history_len: 0,
@@ -227,17 +229,10 @@ impl Searcher {
     ) {
         const MAX_REPORT_INTERVAL: usize = 32768;
 
-        self.root_pos = *root_pos;
         self.root_key_history_len = new_key_history.len();
+        self.init_root(&root_pos, moves_to_search, moves_to_exclude);
 
         self.options = *options;
-
-        self.active_half = TreeHalf::A;
-        for half in self.tree.iter_mut() {
-            half.clear();
-        }
-
-        self.construct_root(moves_to_search, moves_to_exclude);
 
         self.key_history.clear();
         self.key_history.reserve(new_key_history.len() + MAX_DEPTH as usize);
@@ -331,11 +326,13 @@ impl Searcher {
             println!();
         }
 
-        let child_visits: usize = self.tree[self.active_half][0]
-            .children()
-            .map(|idx| self.tree[self.active_half][idx.idx()].visits)
-            .sum();
-        assert_eq!(child_visits, self.tree[self.active_half][0].visits);
+        if !self.reused_tree {
+            let child_visits: usize = self.tree[self.active_half][0]
+                .children()
+                .map(|idx| self.tree[self.active_half][idx.idx()].visits)
+                .sum();
+            assert_eq!(child_visits, self.tree[self.active_half][0].visits);
+        }
 
         println!("bestmove {}", first_best_child.mv.unwrap());
     }
@@ -431,28 +428,159 @@ impl Searcher {
         first_best_child.unwrap()
     }
 
-    fn construct_root(&mut self, moves_to_search: &[Move], moves_to_exclude: &HashSet<Move>) {
-        self.tree[self.active_half].push(Default::default());
-
-        let root_idx = self.active_half.root();
-
+    fn init_root(&mut self, root_pos: &Position, moves_to_search: &[Move], moves_to_exclude: &HashSet<Move>) {
         let mut moves = MoveList::new();
-        get_root_moves(&mut moves, &self.root_pos, moves_to_search, moves_to_exclude);
+        get_root_moves(&mut moves, root_pos, moves_to_search, moves_to_exclude);
 
-        let policy_ctx = PolicyContext::new(&self.root_pos);
-        for &mv in moves.iter() {
-            let idx = self.get_free_node_idx();
-            let policy = self.get_policy(&policy_ctx, &self.root_pos, mv, true);
-            self.tree[self.active_half].push(Node::new(idx, root_idx, mv, policy));
+        self.active_half = self.active_half.flip();
+
+        let prev_pos = self.root_pos;
+        if !self.try_find_root(&prev_pos, root_pos, &moves, self.active_half.root()) {
+            self.reused_tree = false;
+
+            for half in self.tree.iter_mut() {
+                half.clear();
+            }
+
+            self.active_half = TreeHalf::A;
+
+            let root_idx = self.get_free_node_idx();
+            self.tree[self.active_half].push(Default::default());
+
+            for &mv in moves.iter() {
+                let idx = self.get_free_node_idx();
+                self.tree[self.active_half].push(Node::new(idx, root_idx, mv, 0.0));
+            }
+
+            let root = &mut self.tree[self.active_half][0];
+            root.first_child_idx = NodeIndex::new(self.active_half, 1);
+            root.child_count = moves.len() as u16;
+        }
+
+        let policy_ctx = PolicyContext::new(root_pos);
+        for child_idx in self.tree[self.active_half][0].children() {
+            let mv = self.tree[self.active_half][child_idx.idx()].mv.unwrap();
+            let policy = self.get_policy(&policy_ctx, root_pos, mv, true);
+            self.tree[self.active_half][child_idx.idx()].policy = policy;
         }
 
         self.normalize_policy(1..self.tree[self.active_half].len());
-
         self.tree[self.active_half][1..].sort_by(|a, b| b.policy.partial_cmp(&a.policy).unwrap());
 
-        let root = &mut self.tree[self.active_half][0];
-        root.first_child_idx = NodeIndex::new(self.active_half, 1);
-        root.child_count = moves.len() as u16;
+        self.root_pos = *root_pos;
+    }
+
+    fn try_find_root(
+        &mut self,
+        prev_pos: &Position,
+        root_pos: &Position,
+        root_moves: &MoveList,
+        start: NodeIndex,
+    ) -> bool {
+        let dst_half = self.active_half;
+        let src_half = dst_half.flip();
+
+        if self.tree[src_half].is_empty() {
+            println!("info string no tree to reuse");
+            return false;
+        }
+
+        if *prev_pos == *root_pos {
+            println!("info string root unchanged");
+            let root = self.tree[src_half][0];
+            self.copy_root(&root, root_moves);
+            return true;
+        }
+
+        for child_idx in self.tree[src_half][start.idx()].children() {
+            if child_idx.half() != src_half {
+                continue;
+            }
+
+            let child = self.tree[src_half][child_idx.idx()];
+
+            let mut new_pos = *prev_pos;
+            new_pos.apply_move(child.mv.unwrap());
+
+            if new_pos == *root_pos {
+                if child.child_count == 0 {
+                    println!("info string found unexpanded root :c");
+                    return false;
+                }
+
+                println!("info string found new root");
+                self.copy_root(&child, root_moves);
+                return true;
+            }
+
+            if start.is_root() && child.child_count > 0 && self.try_find_root(&new_pos, root_pos, root_moves, child_idx)
+            {
+                return true;
+            }
+        }
+
+        if start.is_root() {
+            println!("info string failed to find usable tree");
+        }
+
+        false
+    }
+
+    fn copy_root(&mut self, src: &Node, root_moves: &MoveList) {
+        let src_half = self.active_half.flip();
+
+        for node in self.tree[self.active_half.flip()].iter_mut() {
+            if node.first_child_idx.half() == self.active_half {
+                node.child_count = 0;
+            }
+        }
+
+        self.tree[self.active_half].clear();
+        self.tree[self.active_half].push(*src);
+
+        self.tree[self.active_half][0].idx = self.active_half.root();
+        self.tree[self.active_half][0].parent = Default::default();
+        self.tree[self.active_half][0].mv = None;
+
+        let first_child_idx = self.get_free_node_idx();
+
+        let mut root_moves = root_moves.clone();
+        let child_count = root_moves.len();
+
+        for subchild_idx in src.children() {
+            if subchild_idx.half() != src_half {
+                continue;
+            }
+
+            let subchild = self.tree[src_half][subchild_idx.idx()];
+            let subchild_mv = subchild.mv.unwrap();
+
+            if !root_moves.contains(&subchild_mv) {
+                println!("info string dropping newly-excluded root move {}", subchild_mv);
+                continue;
+            }
+
+            let idx = self.get_free_node_idx();
+
+            self.tree[self.active_half].push(subchild);
+
+            self.tree[self.active_half][idx.idx()].idx = idx;
+            self.tree[self.active_half][idx.idx()].parent = self.active_half.root();
+
+            root_moves.retain(|&mut mv| mv != subchild_mv);
+        }
+
+        for missing_mv in root_moves {
+            println!("info string inserting previously-excluded root move {}", missing_mv);
+            let idx = self.get_free_node_idx();
+            let new_child = Node::new(idx, self.active_half.root(), missing_mv, 0.0);
+            self.tree[self.active_half].push(new_child);
+        }
+
+        self.tree[self.active_half][0].first_child_idx = first_child_idx;
+        self.tree[self.active_half][0].child_count = child_count as u16;
+
+        self.reused_tree = true;
     }
 
     #[must_use]
@@ -599,6 +727,8 @@ impl Searcher {
             if node_idx.is_root() {
                 break;
             }
+
+            assert_ne!(node_idx, node.parent);
 
             node_idx = node.parent;
             u = 1.0 - u;
