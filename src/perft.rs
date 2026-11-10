@@ -1,6 +1,5 @@
 use crate::movegen::{MoveList, generate_moves};
 use crate::position::Position;
-use crate::takmove::Move;
 use std::time::Instant;
 
 fn do_perft(pos: &Position, depth: i32, movelists: &mut [MoveList]) -> usize {

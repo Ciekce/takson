@@ -8,7 +8,6 @@ use crate::tei::{TeiOptions, score_to_cp};
 use arrayvec::ArrayVec;
 use std::collections::HashSet;
 use std::ops::{Index, IndexMut, Range};
-use std::slice::SliceIndex;
 use std::time::Instant;
 
 pub const MAX_DEPTH: i32 = 255;
