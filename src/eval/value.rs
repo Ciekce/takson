@@ -27,10 +27,7 @@ const Q_BITS: i32 = 6;
 
 #[repr(C, align(64))]
 struct Network {
-    ftw_top: [[i16; L1_SIZE]; TOP_INPUT_SIZE],
-    ftw_stack: [[i16; L1_SIZE]; STACK_INPUT_SIZE],
-    ftw_reserves: [[i16; L1_SIZE]; RESERVES_INPUT_SIZE],
-    ftb: [i16; L1_SIZE],
+    ft: FeatureTransformer<L1_SIZE>,
     l1w: [[i8; L1_SIZE / 2 * L2_SIZE]; OUTPUT_BUCKET_COUNT],
     l1b: [[i32; L2_SIZE]; OUTPUT_BUCKET_COUNT],
     l2w: [[i16; L2_SIZE * L3_SIZE]; OUTPUT_BUCKET_COUNT],
@@ -156,54 +153,10 @@ pub fn eval_value(pos: &Position) -> f32 {
 fn accumulate(pos: &Position) -> Align64<[i16; L1_SIZE]> {
     let mut acc = Align64([0; L1_SIZE]);
 
-    let perspective = pos.stm();
-
-    let transform = normalizer(pos.cap_sq(perspective));
-
     let mut rows = Updates::<L1_SIZE, UPDATE_CHUNK>::default();
+    gather_rows(&mut rows, &NET.ft, pos);
 
-    for side in [Color::White, Color::Black] {
-        for sq in pos.color_bb(side) {
-            let perspective_sq = sq.transform(transform);
-            let pt = pos.top_pt(sq).unwrap();
-            rows.adds
-                .push(&NET.ftw_top[top_feature_idx(perspective, side, pt, perspective_sq)]);
-        }
-    }
-
-    for sq in pos.occ() {
-        let height = pos.height(sq);
-
-        if height == 1 {
-            continue;
-        }
-
-        let top = pos.top(sq).unwrap();
-        let perspective_sq = sq.transform(transform);
-
-        let mut colors = pos.colors(sq) >> 1;
-        let count = height.min(13) - 1;
-
-        for depth in 0..count {
-            let color = Color::from_raw((colors & 0x1) as u8).unwrap();
-            rows.adds
-                .push(&NET.ftw_stack[stack_feature_idx(perspective, top, color, depth, perspective_sq)]);
-            colors >>= 1;
-        }
-    }
-
-    for color in [Color::White, Color::Black] {
-        let reserves = pos.flats_in_hand(color);
-
-        if reserves == 0 {
-            continue;
-        }
-
-        rows.adds
-            .push(&NET.ftw_reserves[reserves_feature_idx(perspective, color, reserves)]);
-    }
-
-    rows.apply(&mut acc.0, &NET.ftb);
+    rows.apply(&mut acc.0, &NET.ft.b);
 
     acc
 }
