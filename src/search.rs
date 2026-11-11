@@ -100,6 +100,7 @@ struct Node {
     first_child_idx: NodeIndex,
     child_count: u16,
     state: Option<GameState>,
+    gini_impurity: u8,
 }
 
 impl Node {
@@ -446,8 +447,9 @@ impl Searcher {
             self.tree[self.active_half].push(Node::new(idx, root_idx, mv, policy));
         }
 
-        self.normalize_policy(1..self.tree[self.active_half].len());
+        let gini_impurity = self.normalize_policy(1..self.tree[self.active_half].len());
 
+        self.tree[self.active_half][0].gini_impurity = (gini_impurity * 255.0) as u8;
         self.tree[self.active_half][1..].sort_by(|a, b| b.policy.partial_cmp(&a.policy).unwrap());
 
         let root = &mut self.tree[self.active_half][0];
@@ -500,7 +502,9 @@ impl Searcher {
             let cpuct = if curr.is_root() { ROOT_CPUCT } else { CPUCT };
             let fpu = if curr.is_root() { 1000.0 } else { node.q() };
 
-            let e = cpuct * (node.visits as f32).sqrt();
+            let gini_impurity = node.gini_impurity as f32 / 255.0;
+
+            let e = cpuct * (node.visits as f32).sqrt() * (0.44 - 1.44 * gini_impurity.max(0.0001).ln()).min(2.2);
 
             let mut proven_loss = true;
             let mut longest_loss = i16::MIN;
@@ -558,11 +562,13 @@ impl Searcher {
             self.tree[self.active_half].push(Node::new(idx, node_idx, mv, policy));
         }
 
-        self.normalize_policy(first_child_idx.idx()..self.tree[self.active_half].len());
+        let gini_impurity =
+            (self.normalize_policy(first_child_idx.idx()..self.tree[self.active_half].len()) * 255.0) as u8;
 
         let node = &mut self.tree[self.active_half][node_idx.idx()];
         node.first_child_idx = first_child_idx;
         node.child_count = moves.len() as u16;
+        node.gini_impurity = gini_impurity;
 
         true
     }
@@ -636,20 +642,26 @@ impl Searcher {
         }
     }
 
-    fn normalize_policy(&mut self, nodes: Range<usize>) {
+    fn normalize_policy(&mut self, nodes: Range<usize>) -> f32 {
         let nodes = &mut self.tree[self.active_half][nodes];
 
         let max = nodes.iter().map(|node| node.policy).reduce(f32::max).unwrap();
 
+        let mut total = 0.0;
+
         for node in nodes.iter_mut() {
             node.policy = (node.policy - max).exp();
+            total += node.policy;
         }
 
-        let total: f32 = nodes.iter().map(|node| node.policy).sum();
+        let mut sum_of_squares = 0.0;
 
         for node in nodes.iter_mut() {
             node.policy /= total;
+            sum_of_squares += node.policy * node.policy;
         }
+
+        (1.0 - sum_of_squares).clamp(0.0, 1.0)
     }
 
     fn flip(&mut self) {
