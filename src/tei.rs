@@ -217,7 +217,7 @@ impl TeiHandler {
             }
         }
 
-        //self.searcher.reset();
+        self.searcher.reset();
     }
 
     fn handle_setoption(&mut self, args: &[&str]) {
