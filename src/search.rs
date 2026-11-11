@@ -506,6 +506,20 @@ impl Searcher {
 
             let e = cpuct * (node.visits as f32).sqrt() * (0.44 - 1.44 * gini_impurity.max(0.0001).ln()).min(2.2);
 
+            let mut min_q = fpu;
+            let mut max_q = fpu;
+
+            for child_idx in node.children() {
+                let child = &self.tree[self.active_half][child_idx.idx()];
+                if child.visits > 0 {
+                    let q = 1.0 - child.q();
+                    min_q = min_q.min(q);
+                    max_q = max_q.max(q);
+                }
+            }
+
+            let q_div = if min_q == max_q { 1.0 } else { max_q - min_q };
+
             let mut proven_loss = true;
             let mut longest_loss = i16::MIN;
 
@@ -522,6 +536,8 @@ impl Searcher {
                 }
 
                 let q = if child.visits == 0 { fpu } else { 1.0 - child.q() };
+                let q = (q - min_q) / q_div;
+
                 let puct = q + e * child.policy / (1 + child.visits) as f32;
 
                 if puct > best_child_puct {
