@@ -460,7 +460,7 @@ impl Searcher {
     #[must_use]
     fn select_expand(&mut self) -> NodeIndex {
         const ROOT_CPUCT: f32 = 1.9;
-        const CPUCT: f32 = 1.5;
+        const CPUCT: f32 = 1.0;
 
         let mut curr = self.active_half.root();
         loop {
@@ -504,7 +504,10 @@ impl Searcher {
 
             let gini_impurity = node.gini_impurity as f32 / 255.0;
 
-            let e = cpuct * (node.visits as f32).sqrt() * (0.44 - 1.44 * gini_impurity.max(0.0001).ln()).min(2.2);
+            let e = cpuct
+                * (node.visits as f32).sqrt()
+                * (1.0 + ((node.visits as f32 + 8192.0) / 8192.0).ln())
+                * (0.44 - 1.44 * gini_impurity.max(0.0001).ln()).min(2.2);
 
             let mut proven_loss = true;
             let mut longest_loss = i16::MIN;
