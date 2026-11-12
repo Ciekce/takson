@@ -506,8 +506,8 @@ impl Searcher {
 
             let e = cpuct
                 * (node.visits as f32).sqrt()
-                * (0.44 - 1.44 * gini_impurity.max(0.0001).ln()).min(2.2)
-                * (1.0 + ((node.visits as f32 + 8192.0) / 8192.0).ln());
+                * (1.0 + ((node.visits as f32 + 8192.0) / 8192.0).ln())
+                * (0.44 - 1.44 * gini_impurity.max(0.0001).ln()).min(2.2);
 
             let mut proven_loss = true;
             let mut longest_loss = i16::MIN;
