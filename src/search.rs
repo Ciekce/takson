@@ -353,14 +353,14 @@ impl Searcher {
         let mut pvs = Vec::new();
         self.gather_pvs(&mut pvs);
 
+        let time = start_time.elapsed().as_secs_f64();
+
+        let capacity = self.tree[self.active_half].capacity();
+        let filled = self.tree[self.active_half].len() as f64 / capacity as f64;
+
         for (pv_idx, root_move) in pvs.iter().enumerate() {
             let score = root_move.score;
-
-            let time = start_time.elapsed().as_secs_f64();
             let [w, d, l] = [score, 0.0, 1.0 - score].map(|score| (score * 1000.0).round() as i32);
-
-            let capacity = self.tree[self.active_half].capacity();
-            let filled = self.tree[self.active_half].len() as f64 / capacity as f64;
 
             let multipv = match self.options.multipv > 1 {
                 true => format!(" multipv {}", pv_idx + 1),
