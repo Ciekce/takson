@@ -161,6 +161,15 @@ impl Iterator for ChildIterator {
     }
 }
 
+type PvList = ArrayVec<Move, { MAX_DEPTH as usize }>;
+
+#[derive(Clone, Debug, Default)]
+struct RootMove {
+    pv: PvList,
+    state: Option<GameState>,
+    score: f32,
+}
+
 pub struct Searcher {
     options: TeiOptions,
     active_half: TreeHalf,
@@ -299,8 +308,7 @@ impl Searcher {
     }
 
     fn final_report(&self, start_time: Instant, iters: usize, depth: i32, seldepth: i32) {
-        let first_best_child = self.report(start_time, iters, depth, seldepth);
-        assert!(!first_best_child.idx.is_root());
+        let root_moves = self.report(start_time, iters, depth, seldepth);
 
         if self.options.report_root_stats && !self.options.silent && !self.options.minimal {
             println!();
@@ -338,98 +346,119 @@ impl Searcher {
             .sum();
         assert_eq!(child_visits, self.tree[self.active_half][0].visits);
 
-        println!("bestmove {}", first_best_child.mv.unwrap());
+        println!("bestmove {}", root_moves[0].pv[0]);
     }
 
-    fn report(&self, start_time: Instant, iters: usize, depth: i32, seldepth: i32) -> &Node {
-        let mut pv = ArrayVec::new();
-        let first_best_child = self.build_pv(&mut pv);
+    fn report(&self, start_time: Instant, iters: usize, depth: i32, seldepth: i32) -> Vec<RootMove> {
+        let mut pvs = Vec::new();
+        self.gather_pvs(&mut pvs);
 
-        let score = 1.0 - first_best_child.q();
+        for (pv_idx, root_move) in pvs.iter().enumerate() {
+            let score = root_move.score;
 
-        let time = start_time.elapsed().as_secs_f64();
-        let [w, d, l] = [score, 0.0, 1.0 - score].map(|score| (score * 1000.0).round() as i32);
+            let time = start_time.elapsed().as_secs_f64();
+            let [w, d, l] = [score, 0.0, 1.0 - score].map(|score| (score * 1000.0).round() as i32);
 
-        let capacity = self.tree[self.active_half].capacity();
-        let filled = self.tree[self.active_half].len() as f64 / capacity as f64;
+            let capacity = self.tree[self.active_half].capacity();
+            let filled = self.tree[self.active_half].len() as f64 / capacity as f64;
 
-        let score = match first_best_child.state {
-            Some(GameState::Loss(plies)) if self.options.mate_scores => format!("mate {}", (plies + 2) / 2),
-            Some(GameState::Win(plies)) if self.options.mate_scores => format!("mate {}", -(plies + 1) / 2),
-            Some(GameState::Loss(plies)) if !self.options.mate_scores => format!("cp {}", 30000 - plies),
-            Some(GameState::Win(plies)) if !self.options.mate_scores => format!("cp {}", -30000 + plies),
-            _ => format!("cp {}", score_to_cp(score)),
-        };
+            let multipv = match self.options.multipv > 1 {
+                true => format!(" multipv {}", pv_idx + 1),
+                false => "".to_string(),
+            };
 
-        print!(
-            "info depth {depth} seldepth {seldepth} time {} nodes {} nps {} score {score} wdl {w} {d} {l} hashfull {} pv",
-            (time * 1000.0) as usize,
-            iters,
-            (iters as f64 / time) as usize,
-            (filled * 1000.0) as usize
-        );
+            let score = match root_move.state {
+                Some(GameState::Loss(plies)) if self.options.mate_scores => format!("mate {}", (plies + 2) / 2),
+                Some(GameState::Win(plies)) if self.options.mate_scores => format!("mate {}", -(plies + 1) / 2),
+                Some(GameState::Loss(plies)) if !self.options.mate_scores => format!("cp {}", 30000 - plies),
+                Some(GameState::Win(plies)) if !self.options.mate_scores => format!("cp {}", -30000 + plies),
+                _ => format!("cp {}", score_to_cp(score)),
+            };
 
-        for &mv in pv.iter() {
-            print!(" {}", mv);
+            print!(
+                "info{multipv} depth {depth} seldepth {seldepth} time {} nodes {} nps {} score {score} wdl {w} {d} {l} hashfull {} pv",
+                (time * 1000.0) as usize,
+                iters,
+                (iters as f64 / time) as usize,
+                (filled * 1000.0) as usize
+            );
+
+            for &mv in root_move.pv.iter() {
+                print!(" {}", mv);
+            }
+
+            println!();
         }
 
-        println!();
-
-        first_best_child
+        pvs
     }
 
-    fn build_pv(&self, dst: &mut ArrayVec<Move, { MAX_DEPTH as usize }>) -> &Node {
-        let mut node = &self.tree[self.active_half][0];
+    fn gather_pvs(&self, dst: &mut Vec<RootMove>) {
+        let count = self
+            .options
+            .multipv
+            .min(self.tree[self.active_half][0].child_count as usize);
+        dst.reserve(count);
 
-        let mut first_best_child = None;
+        let mut excluded = MoveList::new();
 
-        loop {
-            let mut best_child_idx = self.active_half.root();
-            let mut best_child_q = f32::NEG_INFINITY;
+        for _ in 0..count {
+            let mut root_move = RootMove::default();
 
-            for child_idx in node.children() {
-                let child = &self.tree[child_idx.half()][child_idx.idx()];
+            let mut node = &self.tree[self.active_half][0];
+            loop {
+                let mut best_child_idx = self.active_half.root();
+                let mut best_child_q = f32::NEG_INFINITY;
 
-                if child.visits == 0 {
-                    continue;
+                for child_idx in node.children() {
+                    let child = &self.tree[child_idx.half()][child_idx.idx()];
+
+                    if child.visits == 0 || excluded.contains(&child.mv.unwrap()) {
+                        continue;
+                    }
+
+                    let q = match child.state {
+                        Some(GameState::Win(plies)) => -1000.0 + plies as f32,
+                        Some(GameState::Loss(plies)) => 1000.0 - plies as f32,
+                        _ => 1.0 - child.q(),
+                    };
+
+                    if q > best_child_q {
+                        best_child_idx = child_idx;
+                        best_child_q = q;
+                    }
                 }
 
-                let q = match child.state {
-                    Some(GameState::Win(plies)) => -1000.0 + plies as f32,
-                    Some(GameState::Loss(plies)) => 1000.0 - plies as f32,
-                    _ => 1.0 - child.q(),
-                };
-
-                if q > best_child_q {
-                    best_child_idx = child_idx;
-                    best_child_q = q;
+                if best_child_idx.is_root() {
+                    break;
                 }
+
+                let best_child = &self.tree[best_child_idx.half()][best_child_idx.idx()];
+
+                if root_move.pv.is_empty() {
+                    root_move.state = best_child.state;
+                    root_move.score = 1.0 - best_child.q();
+                }
+
+                if root_move.pv.try_push(best_child.mv.unwrap()).is_err() {
+                    break;
+                }
+
+                if best_child.child_count == 0 {
+                    break;
+                }
+
+                node = best_child;
             }
 
-            if best_child_idx.is_root() {
-                assert!(first_best_child.is_some());
+            // not enough children have visits
+            if root_move.pv.is_empty() {
                 break;
             }
 
-            let best_child = &self.tree[best_child_idx.half()][best_child_idx.idx()];
-
-            if first_best_child.is_none() {
-                assert!(!best_child_idx.is_root());
-                first_best_child = Some(&self.tree[best_child_idx.half()][best_child_idx.idx()]);
-            }
-
-            if dst.try_push(best_child.mv.unwrap()).is_err() {
-                break;
-            }
-
-            if best_child.child_count == 0 {
-                break;
-            }
-
-            node = best_child;
+            excluded.push(root_move.pv[0]);
+            dst.push(root_move);
         }
-
-        first_best_child.unwrap()
     }
 
     fn construct_root(&mut self, moves_to_search: &[Move], moves_to_exclude: &HashSet<Move>) {
