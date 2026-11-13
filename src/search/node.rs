@@ -41,7 +41,6 @@ impl NodeIndex {
 
 #[derive(Copy, Clone, Default, Debug)]
 pub struct Node {
-    pub idx: NodeIndex,
     pub parent: NodeIndex,
     pub mv: Option<Move>,
     pub policy: f32,
@@ -56,9 +55,8 @@ pub struct Node {
 
 impl Node {
     #[must_use]
-    pub fn new(idx: NodeIndex, parent: NodeIndex, mv: Move, policy: f32) -> Self {
+    pub fn new(parent: NodeIndex, mv: Move, policy: f32) -> Self {
         Self {
-            idx,
             parent,
             mv: Some(mv),
             policy,

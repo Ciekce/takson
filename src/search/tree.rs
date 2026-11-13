@@ -61,6 +61,7 @@ impl Tree {
     #[must_use]
     pub fn new(size_mib: usize) -> Self {
         let size = calc_node_count(size_mib) / 2;
+        println!("half size: {}", size);
         Self {
             active_half: TreeHalf::A,
             tree: [Vec::with_capacity(size), Vec::with_capacity(size)],
@@ -75,6 +76,7 @@ impl Tree {
         }
 
         let size = calc_node_count(size_mib) / 2;
+        println!("half size: {}", size);
 
         for half in self.tree.iter_mut() {
             *half = Vec::with_capacity(size);
@@ -108,9 +110,8 @@ impl Tree {
 
         let policy_ctx = PolicyContext::new(root_pos);
         for &mv in moves.iter() {
-            let idx = self.next_free_node_idx();
             let policy = self.get_policy(&policy_ctx, root_pos, mv, true);
-            self.tree[self.active_half].push(Node::new(idx, root_idx, mv, policy));
+            self.tree[self.active_half].push(Node::new(root_idx, mv, policy));
         }
 
         let policy_entropy = self.normalize_policy(1..self.tree[self.active_half].len());
@@ -186,9 +187,8 @@ impl Tree {
 
         let policy_ctx = PolicyContext::new(pos);
         for &mv in moves.iter() {
-            let idx = self.next_free_node_idx();
             let policy = self.get_policy(&policy_ctx, pos, mv, false);
-            self.tree[self.active_half].push(Node::new(idx, node_idx, mv, policy));
+            self.tree[self.active_half].push(Node::new(node_idx, mv, policy));
         }
 
         let policy_entropy = self.normalize_policy(first_child_idx.idx()..self.tree[self.active_half].len());
@@ -272,7 +272,6 @@ impl Tree {
         for child_idx in node.children() {
             let mut node = *self.node(child_idx);
             node.parent = node_idx;
-            node.idx = self.next_free_node_idx();
             self.tree[self.active_half].push(node);
         }
 
