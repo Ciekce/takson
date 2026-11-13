@@ -61,7 +61,6 @@ impl Tree {
     #[must_use]
     pub fn new(size_mib: usize) -> Self {
         let size = calc_node_count(size_mib) / 2;
-        println!("half size: {}", size);
         Self {
             active_half: TreeHalf::A,
             tree: [Vec::with_capacity(size), Vec::with_capacity(size)],
@@ -76,7 +75,6 @@ impl Tree {
         }
 
         let size = calc_node_count(size_mib) / 2;
-        println!("half size: {}", size);
 
         for half in self.tree.iter_mut() {
             *half = Vec::with_capacity(size);
