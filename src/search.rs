@@ -97,6 +97,7 @@ struct Node {
     policy: f32,
     visits: usize,
     total_score: f64,
+    total_sq_score: f32,
     first_child_idx: NodeIndex,
     child_count: u16,
     state: Option<GameState>,
@@ -124,6 +125,14 @@ impl Node {
             Some(GameState::Loss(_)) => 0.0,
             _ => (self.total_score / self.visits as f64) as f32,
         }
+    }
+
+    #[must_use]
+    fn q_variance(&self) -> f32 {
+        assert!(self.visits > 0);
+        let visits = self.visits as f64;
+        let var = self.total_sq_score as f64 / visits - (self.total_score / visits).powi(2);
+        var.max(0.0) as f32
     }
 
     #[must_use]
@@ -533,10 +542,19 @@ impl Searcher {
 
             let gini_impurity = node.gini_impurity as f32 / 255.0;
 
-            let e = cpuct
-                * (node.visits as f32).sqrt()
-                * (1.0 + ((node.visits as f32 + 8192.0) / 8192.0).ln())
-                * (0.44 - 1.44 * gini_impurity.max(0.0001).ln()).min(2.2);
+            let e = {
+                let mut e = cpuct;
+
+                e *= (node.visits as f32).sqrt();
+                e *= (1.0 + ((node.visits as f32 + 8192.0) / 8192.0).ln());
+                e *= (0.44 - 1.44 * gini_impurity.max(0.0001).ln()).min(2.2);
+
+                if node.visits > 1 {
+                    e *= 1.0 + 0.85 * (node.q_variance().sqrt() * 5.0 - 1.0);
+                }
+
+                e
+            };
 
             let mut proven_loss = true;
             let mut longest_loss = i16::MIN;
@@ -633,6 +651,7 @@ impl Searcher {
 
             node.visits += 1;
             node.total_score += u as f64;
+            node.total_sq_score += u * u;
 
             if node_idx.is_root() {
                 break;
