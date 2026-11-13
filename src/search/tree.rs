@@ -154,12 +154,10 @@ impl Tree {
 
     fn try_find_root(&mut self, prev_pos: &Position, root_pos: &Position, start: NodeIndex) -> bool {
         if self.tree[self.active_half].is_empty() {
-            println!("info string no tree to reuse");
             return false;
         }
 
         if *root_pos == *prev_pos {
-            println!("info string root pos unchanged");
             return true;
         }
 
@@ -175,16 +173,13 @@ impl Tree {
 
             if new_pos == *root_pos {
                 if child.child_count == 0 {
-                    println!("info string found unexpanded root :c");
                     return false;
                 }
 
                 if child.first_child_idx.half() != self.active_half {
-                    println!("info string found root with children in wrong half :c");
                     return false;
                 }
 
-                println!("info string found new root");
                 self.copy_root(&child);
                 return true;
             }
@@ -192,10 +187,6 @@ impl Tree {
             if start.is_root() && child.child_count > 0 && self.try_find_root(&new_pos, root_pos, child_idx) {
                 return true;
             }
-        }
-
-        if start.is_root() {
-            println!("info string failed to find usable tree");
         }
 
         false
