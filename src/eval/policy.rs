@@ -1,5 +1,5 @@
 use super::simd::*;
-use crate::core::{Color, PieceType, Square, Transform, normalizer};
+use crate::core::{PieceType, Square, Transform, normalizer};
 use crate::eval::*;
 use crate::position::Position;
 use crate::takmove::Move;

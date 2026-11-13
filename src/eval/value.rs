@@ -1,5 +1,5 @@
 use super::simd::*;
-use crate::core::{Color, normalizer};
+use crate::core::Color;
 use crate::eval::*;
 use crate::position::Position;
 
