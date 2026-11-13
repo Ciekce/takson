@@ -56,6 +56,7 @@ pub struct Tree {
     tree: [Vec<Node>; 2],
     root_pos: Position,
     value_policy: bool,
+    reused_tree: bool,
 }
 
 impl Tree {
@@ -67,6 +68,7 @@ impl Tree {
             tree: [Vec::with_capacity(size), Vec::with_capacity(size)],
             root_pos: Position::startpos(),
             value_policy: false,
+            reused_tree: false,
         }
     }
 
@@ -98,8 +100,10 @@ impl Tree {
         moves_to_exclude: &HashSet<Move>,
     ) {
         self.value_policy = options.value_policy;
+        self.reused_tree = true;
 
-        {
+        let prev_pos = self.root_pos;
+        if !self.try_find_root(&prev_pos, root_pos, self.active_half.root()) {
             self.reset();
 
             self.tree[self.active_half].push(Node::new_root());
@@ -118,6 +122,8 @@ impl Tree {
             let root = self.root_mut();
             root.first_child_idx = NodeIndex::new(active_half, 1);
             root.child_count = moves.len() as u16;
+
+            self.reused_tree = false;
         }
 
         let mut root_moves = MoveList::new();
@@ -142,6 +148,86 @@ impl Tree {
 
         let policy_entropy = self.normalize_policy(1..unexcluded_end);
         self.root_mut().set_policy_entropy(policy_entropy);
+
+        self.root_pos = *root_pos;
+    }
+
+    fn try_find_root(&mut self, prev_pos: &Position, root_pos: &Position, start: NodeIndex) -> bool {
+        if self.tree[self.active_half].is_empty() {
+            println!("info string no tree to reuse");
+            return false;
+        }
+
+        if *root_pos == *prev_pos {
+            println!("info string root pos unchanged");
+            return true;
+        }
+
+        for child_idx in self.tree[self.active_half][start.idx()].children() {
+            if child_idx.half() != self.active_half {
+                continue;
+            }
+
+            let child = self.tree[self.active_half][child_idx.idx()];
+
+            let mut new_pos = *prev_pos;
+            new_pos.apply_move(child.mv.unwrap());
+
+            if new_pos == *root_pos {
+                if child.child_count == 0 {
+                    println!("info string found unexpanded root :c");
+                    return false;
+                }
+
+                if child.first_child_idx.half() != self.active_half {
+                    println!("info string found root with children in wrong half :c");
+                    return false;
+                }
+
+                println!("info string found new root");
+                self.copy_root(&child);
+                return true;
+            }
+
+            if start.is_root() && child.child_count > 0 && self.try_find_root(&new_pos, root_pos, child_idx) {
+                return true;
+            }
+        }
+
+        if start.is_root() {
+            println!("info string failed to find usable tree");
+        }
+
+        false
+    }
+
+    fn copy_root(&mut self, src: &Node) {
+        let src_half = self.active_half;
+
+        for node in self.tree[self.active_half].iter_mut() {
+            if node.first_child_idx.half() != self.active_half {
+                node.child_count = 0;
+            }
+        }
+
+        self.active_half = self.active_half.flip();
+
+        self.tree[self.active_half].clear();
+        self.tree[self.active_half].push(*src);
+
+        self.tree[self.active_half][0].parent = Default::default();
+        self.tree[self.active_half][0].mv = None;
+
+        let first_child_idx = self.next_free_node_idx();
+
+        for child_idx in src.children() {
+            assert_eq!(child_idx.half(), src_half);
+            let mut child = *self.node(child_idx);
+            child.parent = self.root_idx();
+            self.tree[self.active_half].push(child);
+        }
+
+        self.tree[self.active_half][0].first_child_idx = first_child_idx;
     }
 
     pub fn flip(&mut self) {
@@ -302,6 +388,11 @@ impl Tree {
         let capacity = self.tree[self.active_half].capacity();
         let filled = self.tree[self.active_half].len() as f64 / capacity as f64;
         (filled * 1000.0) as usize
+    }
+
+    #[must_use]
+    pub fn reused_tree(&self) -> bool {
+        self.reused_tree
     }
 
     #[must_use]

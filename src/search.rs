@@ -181,8 +181,10 @@ impl Searcher {
             println!();
         }
 
-        let child_visits: usize = self.tree.root().children().map(|idx| self.tree.node(idx).visits).sum();
-        assert_eq!(child_visits, self.tree.root().visits);
+        if !self.tree.reused_tree() {
+            let child_visits: usize = self.tree.root().children().map(|idx| self.tree.node(idx).visits).sum();
+            assert_eq!(child_visits, self.tree.root().visits);
+        }
 
         println!("bestmove {}", root_moves[0].pv[0]);
     }
