@@ -141,6 +141,10 @@ impl Searcher {
         }
     }
 
+    pub fn reset(&mut self) {
+        self.tree.reset();
+    }
+
     fn final_report(&self, start_time: Instant, iters: usize, depth: i32, seldepth: i32) {
         let root_moves = self.report(start_time, iters, depth, seldepth);
 
@@ -154,6 +158,9 @@ impl Searcher {
             println!("info string root V: {} Q: {}{}", root.visits, root.q(), state);
             for child_idx in root.children() {
                 let node = self.tree.node(child_idx);
+                if node.policy == f32::NEG_INFINITY {
+                    break;
+                }
                 let q = match node.visits > 0 {
                     true => (1.0 - node.q()).to_string(),
                     false => "n/a".to_string(),
@@ -174,8 +181,10 @@ impl Searcher {
             println!();
         }
 
-        let child_visits: usize = self.tree.root().children().map(|idx| self.tree.node(idx).visits).sum();
-        assert_eq!(child_visits, self.tree.root().visits);
+        if !self.tree.reused_tree() {
+            let child_visits: usize = self.tree.root().children().map(|idx| self.tree.node(idx).visits).sum();
+            assert_eq!(child_visits, self.tree.root().visits);
+        }
 
         println!("bestmove {}", root_moves[0].pv[0]);
     }
@@ -239,7 +248,7 @@ impl Searcher {
                 for child_idx in node.children() {
                     let child = self.tree.node(child_idx);
 
-                    if child.visits == 0 || excluded.contains(&child.mv.unwrap()) {
+                    if child.visits == 0 || child.policy == f32::NEG_INFINITY || excluded.contains(&child.mv.unwrap()) {
                         continue;
                     }
 

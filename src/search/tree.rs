@@ -54,7 +54,9 @@ fn calc_node_count(mib: usize) -> usize {
 pub struct Tree {
     active_half: TreeHalf,
     tree: [Vec<Node>; 2],
+    root_pos: Position,
     value_policy: bool,
+    reused_tree: bool,
 }
 
 impl Tree {
@@ -64,7 +66,9 @@ impl Tree {
         Self {
             active_half: TreeHalf::A,
             tree: [Vec::with_capacity(size), Vec::with_capacity(size)],
+            root_pos: Position::startpos(),
             value_policy: false,
+            reused_tree: false,
         }
     }
 
@@ -95,34 +99,126 @@ impl Tree {
         moves_to_search: &[Move],
         moves_to_exclude: &HashSet<Move>,
     ) {
-        self.reset();
-
         self.value_policy = options.value_policy;
+        self.reused_tree = true;
 
-        self.tree[self.active_half].push(Node::new_root());
+        let prev_pos = self.root_pos;
+        if !self.try_find_root(&prev_pos, root_pos, self.active_half.root()) {
+            self.reset();
 
-        let root_idx = self.root_idx();
+            self.tree[self.active_half].push(Node::new_root());
 
-        let mut moves = MoveList::new();
-        get_root_moves(&mut moves, root_pos, moves_to_search, moves_to_exclude);
+            let mut moves = MoveList::new();
+            generate_moves(&mut moves, root_pos);
 
-        let policy_ctx = PolicyContext::new(root_pos);
-        for &mv in moves.iter() {
-            let policy = self.get_policy(&policy_ctx, root_pos, mv, true);
-            self.tree[self.active_half].push(Node::new(root_idx, mv, policy));
+            let root_idx = self.root_idx();
+
+            for &mv in moves.iter() {
+                self.tree[self.active_half].push(Node::new(root_idx, mv, 0.0));
+            }
+
+            let active_half = self.active_half;
+
+            let root = self.root_mut();
+            root.first_child_idx = NodeIndex::new(active_half, 1);
+            root.child_count = moves.len() as u16;
+
+            self.reused_tree = false;
         }
 
-        let policy_entropy = self.normalize_policy(1..self.tree[self.active_half].len());
+        let mut root_moves = MoveList::new();
+        get_root_moves(&mut root_moves, root_pos, moves_to_search, moves_to_exclude);
 
-        self.tree[self.active_half][1..].sort_by(|a, b| b.policy.partial_cmp(&a.policy).unwrap());
+        let policy_ctx = PolicyContext::new(root_pos);
+        for child_idx in self.tree[self.active_half][0].children() {
+            let mv = self.node(child_idx).mv.unwrap();
+            let policy = match root_moves.contains(&mv) {
+                true => self.get_policy(&policy_ctx, root_pos, mv, true),
+                false => f32::NEG_INFINITY,
+            };
+            self.node_mut(child_idx).policy = policy;
+        }
 
-        let active_half = self.active_half;
+        let root_child_count = self.root().child_count as usize;
+        self.tree[self.active_half][1..root_child_count + 1].sort_by(|a, b| b.policy.partial_cmp(&a.policy).unwrap());
 
-        let root = self.root_mut();
-        root.first_child_idx = NodeIndex::new(active_half, 1);
-        root.child_count = moves.len() as u16;
+        let unexcluded_end = (1..root_child_count + 1)
+            .find(|&child_idx| self.tree[self.active_half][child_idx].policy == f32::NEG_INFINITY)
+            .unwrap_or(root_child_count + 1);
 
+        let policy_entropy = self.normalize_policy(1..unexcluded_end);
         self.root_mut().set_policy_entropy(policy_entropy);
+
+        self.root_pos = *root_pos;
+    }
+
+    fn try_find_root(&mut self, prev_pos: &Position, root_pos: &Position, start: NodeIndex) -> bool {
+        if self.tree[self.active_half].is_empty() {
+            return false;
+        }
+
+        if *root_pos == *prev_pos {
+            return true;
+        }
+
+        for child_idx in self.tree[self.active_half][start.idx()].children() {
+            if child_idx.half() != self.active_half {
+                continue;
+            }
+
+            let child = self.tree[self.active_half][child_idx.idx()];
+
+            let mut new_pos = *prev_pos;
+            new_pos.apply_move(child.mv.unwrap());
+
+            if new_pos == *root_pos {
+                if child.child_count == 0 {
+                    return false;
+                }
+
+                if child.first_child_idx.half() != self.active_half {
+                    return false;
+                }
+
+                self.copy_root(&child);
+                return true;
+            }
+
+            if start.is_root() && child.child_count > 0 && self.try_find_root(&new_pos, root_pos, child_idx) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn copy_root(&mut self, src: &Node) {
+        let src_half = self.active_half;
+
+        for node in self.tree[self.active_half].iter_mut() {
+            if node.first_child_idx.half() != self.active_half {
+                node.child_count = 0;
+            }
+        }
+
+        self.active_half = self.active_half.flip();
+
+        self.tree[self.active_half].clear();
+        self.tree[self.active_half].push(*src);
+
+        self.tree[self.active_half][0].parent = Default::default();
+        self.tree[self.active_half][0].mv = None;
+
+        let first_child_idx = self.next_free_node_idx();
+
+        for child_idx in src.children() {
+            assert_eq!(child_idx.half(), src_half);
+            let mut child = *self.node(child_idx);
+            child.parent = self.root_idx();
+            self.tree[self.active_half].push(child);
+        }
+
+        self.tree[self.active_half][0].first_child_idx = first_child_idx;
     }
 
     pub fn flip(&mut self) {
@@ -283,6 +379,11 @@ impl Tree {
         let capacity = self.tree[self.active_half].capacity();
         let filled = self.tree[self.active_half].len() as f64 / capacity as f64;
         (filled * 1000.0) as usize
+    }
+
+    #[must_use]
+    pub fn reused_tree(&self) -> bool {
+        self.reused_tree
     }
 
     #[must_use]
