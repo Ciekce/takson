@@ -101,7 +101,7 @@ impl Tree {
 
         self.value_policy = options.value_policy;
 
-        self.tree[self.active_half].push(Default::default());
+        self.tree[self.active_half].push(Node::new_root());
 
         let root_idx = self.root_idx();
 

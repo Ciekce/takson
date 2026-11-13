@@ -65,6 +65,16 @@ impl Node {
     }
 
     #[must_use]
+    pub fn new_root() -> Self {
+        Self {
+            parent: Default::default(),
+            mv: None,
+            policy: 0.0,
+            ..Default::default()
+        }
+    }
+
+    #[must_use]
     pub fn q(&self) -> f32 {
         assert!(self.visits > 0);
         match self.state {
