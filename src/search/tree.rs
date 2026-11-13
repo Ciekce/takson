@@ -54,6 +54,7 @@ fn calc_node_count(mib: usize) -> usize {
 pub struct Tree {
     active_half: TreeHalf,
     tree: [Vec<Node>; 2],
+    root_pos: Position,
     value_policy: bool,
 }
 
@@ -64,6 +65,7 @@ impl Tree {
         Self {
             active_half: TreeHalf::A,
             tree: [Vec::with_capacity(size), Vec::with_capacity(size)],
+            root_pos: Position::startpos(),
             value_policy: false,
         }
     }
@@ -95,33 +97,50 @@ impl Tree {
         moves_to_search: &[Move],
         moves_to_exclude: &HashSet<Move>,
     ) {
-        self.reset();
-
         self.value_policy = options.value_policy;
 
-        self.tree[self.active_half].push(Node::new_root());
+        {
+            self.reset();
 
-        let root_idx = self.root_idx();
+            self.tree[self.active_half].push(Node::new_root());
 
-        let mut moves = MoveList::new();
-        get_root_moves(&mut moves, root_pos, moves_to_search, moves_to_exclude);
+            let mut moves = MoveList::new();
+            generate_moves(&mut moves, root_pos);
 
-        let policy_ctx = PolicyContext::new(root_pos);
-        for &mv in moves.iter() {
-            let policy = self.get_policy(&policy_ctx, root_pos, mv, true);
-            self.tree[self.active_half].push(Node::new(root_idx, mv, policy));
+            let root_idx = self.root_idx();
+
+            for &mv in moves.iter() {
+                self.tree[self.active_half].push(Node::new(root_idx, mv, 0.0));
+            }
+
+            let active_half = self.active_half;
+
+            let root = self.root_mut();
+            root.first_child_idx = NodeIndex::new(active_half, 1);
+            root.child_count = moves.len() as u16;
         }
 
-        let policy_entropy = self.normalize_policy(1..self.tree[self.active_half].len());
+        let mut root_moves = MoveList::new();
+        get_root_moves(&mut root_moves, root_pos, moves_to_search, moves_to_exclude);
 
-        self.tree[self.active_half][1..].sort_by(|a, b| b.policy.partial_cmp(&a.policy).unwrap());
+        let policy_ctx = PolicyContext::new(root_pos);
+        for child_idx in self.tree[self.active_half][0].children() {
+            let mv = self.node(child_idx).mv.unwrap();
+            let policy = match root_moves.contains(&mv) {
+                true => self.get_policy(&policy_ctx, root_pos, mv, true),
+                false => f32::NEG_INFINITY,
+            };
+            self.node_mut(child_idx).policy = policy;
+        }
 
-        let active_half = self.active_half;
+        let root_child_count = self.root().child_count as usize;
+        self.tree[self.active_half][1..root_child_count + 1].sort_by(|a, b| b.policy.partial_cmp(&a.policy).unwrap());
 
-        let root = self.root_mut();
-        root.first_child_idx = NodeIndex::new(active_half, 1);
-        root.child_count = moves.len() as u16;
+        let unexcluded_end = (1..root_child_count + 1)
+            .find(|&child_idx| self.tree[self.active_half][child_idx].policy == f32::NEG_INFINITY)
+            .unwrap_or(root_child_count + 1);
 
+        let policy_entropy = self.normalize_policy(1..unexcluded_end);
         self.root_mut().set_policy_entropy(policy_entropy);
     }
 
