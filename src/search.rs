@@ -358,6 +358,9 @@ impl Searcher {
             let mut proven_loss = true;
             let mut longest_loss = i16::MIN;
 
+            let mut can_draw = false;
+            let mut must_draw = true;
+
             let mut best_child = Default::default();
             let mut best_child_puct = f32::NEG_INFINITY;
 
@@ -370,6 +373,16 @@ impl Searcher {
                     proven_loss = false;
                 }
 
+                match child.state {
+                    Some(GameState::Draw) | Some(GameState::UpcomingDraw) => can_draw = true,
+                    Some(GameState::Win(_)) => {}
+                    _ => must_draw = false,
+                };
+
+                if child.state == Some(GameState::Draw) {
+                    can_draw = true;
+                }
+
                 let q = if child.visits == 0 { fpu } else { 1.0 - child.q() };
                 let puct = q + e * child.policy / (1 + child.visits) as f32;
 
@@ -380,7 +393,16 @@ impl Searcher {
             }
 
             if proven_loss {
+                assert!(!can_draw);
                 self.tree.node_mut(curr).set_state(GameState::Loss(longest_loss + 1));
+            }
+
+            if can_draw {
+                if must_draw {
+                    self.tree.node_mut(curr).set_state(GameState::UpcomingDraw);
+                } else {
+                    self.tree.node_mut(curr).raise_min_q(0.5);
+                }
             }
 
             curr = best_child;
@@ -441,6 +463,7 @@ impl Searcher {
 enum GameState {
     Win(i16),
     Draw,
+    UpcomingDraw,
     Loss(i16),
     Ongoing,
 }
@@ -455,7 +478,7 @@ impl GameState {
     fn u(self) -> Option<f32> {
         match self {
             Self::Win(_) => Some(1.0),
-            Self::Draw => Some(0.5),
+            Self::Draw | Self::UpcomingDraw => Some(0.5),
             Self::Loss(_) => Some(0.0),
             Self::Ongoing => None,
         }

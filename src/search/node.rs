@@ -50,6 +50,7 @@ pub struct Node {
     pub first_child_idx: NodeIndex,
     pub child_count: u16,
     pub state: Option<GameState>,
+    min_q: f32,
     policy_entropy: u8,
 }
 
@@ -81,7 +82,7 @@ impl Node {
             Some(GameState::Win(_)) => 1.0,
             Some(GameState::Draw) => 0.5,
             Some(GameState::Loss(_)) => 0.0,
-            _ => (self.total_score / self.visits as f64) as f32,
+            _ => ((self.total_score / self.visits as f64) as f32).max(self.min_q),
         }
     }
 
@@ -124,6 +125,10 @@ impl Node {
 
     pub fn set_state(&mut self, state: GameState) {
         self.state = Some(state);
+    }
+
+    pub fn raise_min_q(&mut self, min_q: f32) {
+        self.min_q = self.min_q.max(min_q)
     }
 }
 
