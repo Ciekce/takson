@@ -1,6 +1,6 @@
 use std::{env, fs, path::PathBuf, process::Command};
 
-const VALUE_NET: &str = "tyltaks_2560_2";
+const VALUE_NET: &str = "value001";
 const POLICY_NET: &str = "policy002";
 
 const DOWNLOAD_URL: &str = "https://github.com/Ciekce/takson-nets/releases/download";
