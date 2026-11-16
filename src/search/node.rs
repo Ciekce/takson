@@ -47,6 +47,7 @@ pub struct Node {
     pub visits: usize,
     pub total_score: f64,
     pub total_sq_score: f32,
+    pub total_d: f32,
     pub first_child_idx: NodeIndex,
     pub child_count: u16,
     pub state: Option<GameState>,
@@ -94,6 +95,16 @@ impl Node {
     }
 
     #[must_use]
+    pub fn d(&self) -> f32 {
+        assert!(self.visits > 0);
+        match self.state {
+            Some(GameState::Win(_) | GameState::Loss(_)) => 0.0,
+            Some(GameState::Draw) => 1.0,
+            _ => self.total_d / self.visits as f32,
+        }
+    }
+
+    #[must_use]
     pub fn children(&self) -> ChildIterator {
         assert!(self.child_count > 0);
         let half = self.first_child_idx.half();
@@ -116,10 +127,11 @@ impl Node {
         self.policy_entropy as f32 / 255.0
     }
 
-    pub fn update(&mut self, score: f32) {
+    pub fn update(&mut self, score: f32, d: f32) {
         self.visits += 1;
         self.total_score += score as f64;
         self.total_sq_score += score * score;
+        self.total_d += d;
     }
 
     pub fn set_state(&mut self, state: GameState) {

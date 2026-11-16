@@ -1,5 +1,5 @@
 use crate::eval::policy::PolicyContext;
-use crate::eval::value::eval_value;
+use crate::eval::value::eval_value_qd;
 use crate::movegen::{MoveList, generate_moves};
 use crate::position::{FlatCountOutcome, Position};
 use crate::search::node::{Node, NodeIndex};
@@ -320,7 +320,7 @@ impl Tree {
         let pst = if root { ROOT_PST } else { PST };
 
         if self.value_policy {
-            let value = 1.0 - eval_value(&new_pos);
+            let value = 1.0 - eval_value_qd(&new_pos).0;
             4.0 * (value / (1.0 - value)).ln() / pst
         } else {
             ctx.get(mv) / pst

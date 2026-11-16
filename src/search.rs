@@ -1,11 +1,11 @@
-use crate::eval::value::eval_value;
+use crate::eval::value::eval_value_qd;
 use crate::limit::Limits;
 use crate::movegen::MoveList;
 use crate::position::{FlatCountOutcome, Position};
 use crate::search::node::NodeIndex;
 use crate::search::tree::Tree;
 use crate::takmove::Move;
-use crate::tei::{TeiOptions, score_to_cp};
+use crate::tei::{TeiOptions, score_to_cp, wdl_to_mu};
 use arrayvec::ArrayVec;
 use std::collections::HashSet;
 use std::time::Instant;
@@ -25,6 +25,7 @@ struct RootMove {
     pv: PvList,
     state: Option<GameState>,
     score: f32,
+    d: f32,
 }
 
 pub struct Searcher {
@@ -106,8 +107,8 @@ impl Searcher {
             assert!(!leaf.is_root());
             assert_eq!(leaf.half(), self.tree.active_half());
 
-            let u = self.simulate(leaf);
-            self.backprop(leaf, u);
+            let (u, d) = self.simulate(leaf);
+            self.backprop(leaf, u, d);
 
             self.iters += 1;
 
@@ -198,7 +199,21 @@ impl Searcher {
 
         for (pv_idx, root_move) in pvs.iter().enumerate() {
             let score = root_move.score;
-            let [w, d, l] = [score, 0.0, 1.0 - score].map(|score| (score * 1000.0).round() as i32);
+
+            let d = root_move.d;
+            let w = score - d / 2.0;
+
+            let mu = (wdl_to_mu(w, d, 1.0 - w - d) * 100.0).round() as i32;
+
+            let mut w = (1000.0 * w).round() as i32;
+            let mut d = (1000.0 * d).round() as i32;
+            let mut l = 1000 - w - d;
+
+            if l < 0 {
+                w = (w + d).max(1000);
+                d = 0;
+                l = 1000 - w;
+            }
 
             let multipv = match self.options.multipv > 1 {
                 true => format!(" multipv {}", pv_idx + 1),
@@ -210,7 +225,7 @@ impl Searcher {
                 Some(GameState::Win(plies)) if self.options.mate_scores => format!("mate {}", -(plies + 1) / 2),
                 Some(GameState::Loss(plies)) if !self.options.mate_scores => format!("cp {}", 30000 - plies),
                 Some(GameState::Win(plies)) if !self.options.mate_scores => format!("cp {}", -30000 + plies),
-                _ => format!("cp {}", score_to_cp(score)),
+                _ => format!("cp {}", mu),
             };
 
             print!(
@@ -273,6 +288,7 @@ impl Searcher {
                 if root_move.pv.is_empty() {
                     root_move.state = best_child.state;
                     root_move.score = 1.0 - best_child.q();
+                    root_move.d = best_child.d();
                 }
 
                 if root_move.pv.try_push(best_child.mv.unwrap()).is_err() {
@@ -392,7 +408,7 @@ impl Searcher {
     }
 
     #[must_use]
-    fn simulate(&mut self, node_idx: NodeIndex) -> f32 {
+    fn simulate(&mut self, node_idx: NodeIndex) -> (f32, f32) {
         let node = self.tree.node_mut(node_idx);
 
         if node.state.is_none() {
@@ -401,11 +417,11 @@ impl Searcher {
         }
 
         node.state
-            .and_then(GameState::u)
-            .unwrap_or_else(|| eval_value(&self.pos))
+            .and_then(GameState::u_d)
+            .unwrap_or_else(|| eval_value_qd(&self.pos))
     }
 
-    fn backprop(&mut self, mut node_idx: NodeIndex, mut u: f32) {
+    fn backprop(&mut self, mut node_idx: NodeIndex, mut u: f32, d: f32) {
         assert!(!node_idx.is_root());
         let mut child_state = GameState::Ongoing;
         loop {
@@ -418,7 +434,7 @@ impl Searcher {
                 node.set_state(GameState::Win(plies + 1));
             }
 
-            node.update(u);
+            node.update(u, d);
 
             if node_idx.is_root() {
                 break;
@@ -452,11 +468,11 @@ impl GameState {
     }
 
     #[must_use]
-    fn u(self) -> Option<f32> {
+    fn u_d(self) -> Option<(f32, f32)> {
         match self {
-            Self::Win(_) => Some(1.0),
-            Self::Draw => Some(0.5),
-            Self::Loss(_) => Some(0.0),
+            Self::Win(_) => Some((1.0, 0.0)),
+            Self::Draw => Some((0.5, 1.0)),
+            Self::Loss(_) => Some((0.0, 0.0)),
             Self::Ongoing => None,
         }
     }

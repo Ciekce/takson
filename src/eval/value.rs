@@ -7,7 +7,7 @@ use crate::position::Position;
 const L1_SIZE: usize = 2560;
 const L2_SIZE: usize = 32;
 const L3_SIZE: usize = 32;
-const OUTPUtS: usize = 3;
+const OUTPUTS: usize = 3;
 
 #[cfg(target_feature = "avx512f")]
 const UPDATE_CHUNK: usize = L1_SIZE / 4;
@@ -34,8 +34,8 @@ struct Network {
     l1b: [[i32; L2_SIZE]; OUTPUT_BUCKET_COUNT],
     l2w: [[i16; L2_SIZE * L3_SIZE]; OUTPUT_BUCKET_COUNT],
     l2b: [[i32; L3_SIZE]; OUTPUT_BUCKET_COUNT],
-    l3w: [[[i32; L3_SIZE]; OUTPUtS]; OUTPUT_BUCKET_COUNT],
-    l3b: [[i32; OUTPUtS]; OUTPUT_BUCKET_COUNT],
+    l3w: [[[i32; L3_SIZE]; OUTPUTS]; OUTPUT_BUCKET_COUNT],
+    l3b: [[i32; OUTPUTS]; OUTPUT_BUCKET_COUNT],
 }
 
 static NET: Network = unsafe { std::mem::transmute(*include_bytes!(env!("EVALFILE"))) };
@@ -45,7 +45,7 @@ const SHIFT: i32 = Q0_BITS * 2 + MULHI_SHIFT + Q1_BITS - Q_BITS;
 const L2_UNROLL: usize = 8 / (L2_SIZE / CHUNK_SIZE_I32);
 
 #[must_use]
-pub fn eval_value(pos: &Position) -> f32 {
+pub fn eval_value_raw(pos: &Position) -> (f32, f32, f32) {
     let output_bucket = calc_output_bucket(pos);
 
     let acc = accumulate(pos);
@@ -118,7 +118,7 @@ pub fn eval_value(pos: &Position) -> f32 {
 
     let l2_intermediate = l2_intermediate.map(reduce_dpwssd_i32);
 
-    let mut l3_sums = [zero_i32(); OUTPUtS];
+    let mut l3_sums = [zero_i32(); OUTPUTS];
     {
         let l2_biases = NET.l2b[output_bucket].as_ptr();
         let l3_weights = &NET.l3w[output_bucket];
@@ -148,13 +148,48 @@ pub fn eval_value(pos: &Position) -> f32 {
     const SKIP_SCALE: i32 = Q * Q * Q * Q / (Q * 256);
     const OUT_SCALE: f32 = 1.0 / (Q * Q * Q * Q) as f32;
 
-    let [loss, draw, win]: [f32; OUTPUtS] =
+    let [l, d, w] =
         std::array::from_fn(|i| ((hsum_i32(l3_sums[i]) + biases[i]) + skips[i] * SKIP_SCALE) as f32 * OUT_SCALE);
 
-    let loss = fastmath::exp(loss - draw);
-    let win = fastmath::exp(win - draw);
+    (w, d, l)
+}
 
-    (win + 0.5) / (loss + 1.0 + win)
+// slower, use qd for search
+#[must_use]
+pub fn eval_value_wdl(pos: &Position) -> (f32, f32, f32) {
+    let (mut w, mut d, mut l) = eval_value_raw(pos);
+
+    let max = w.max(d).max(l);
+
+    w -= max;
+    d -= max;
+    l -= max;
+
+    w = w.exp();
+    d = d.exp();
+    l = l.exp();
+
+    let sum = w + d + l;
+
+    (w / sum, d / sum, l / sum)
+}
+
+#[must_use]
+pub fn eval_value_qd(pos: &Position) -> (f32, f32) {
+    let (w, d, l) = eval_value_raw(pos);
+
+    let max = w.max(d).max(l);
+
+    let w = fastmath::exp(w - max);
+    let d = fastmath::exp(d - max);
+    let l = fastmath::exp(l - max);
+
+    let inv_sum = 1.0 / (w + d + l);
+
+    let w = w * inv_sum;
+    let d = d * inv_sum;
+
+    (w + d * 0.5, d)
 }
 
 #[must_use]
