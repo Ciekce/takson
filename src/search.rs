@@ -210,7 +210,7 @@ impl Searcher {
             let mut l = 1000 - w - d;
 
             if l < 0 {
-                w = (w + d).max(1000);
+                w = (w + d).min(1000);
                 d = 0;
                 l = 1000 - w;
             }
