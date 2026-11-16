@@ -201,7 +201,7 @@ impl Searcher {
             let score = root_move.score;
 
             let d = root_move.d;
-            let w = score - d / 2.0;
+            let w = (score - d / 2.0).max(0.0);
 
             let mu = (wdl_to_mu(w, d, 1.0 - w - d) * 100.0).round() as i32;
 
