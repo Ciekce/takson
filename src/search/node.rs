@@ -51,7 +51,7 @@ pub struct Node {
     pub parent: NodeIndex,
     pub mv: Option<Move>,
     pub policy: f32,
-    pub visits: usize,
+    pub visits: u32,
     pub total_score: f64,
     pub total_sq_score: f32,
     pub first_child_idx: NodeIndex,
