@@ -20,7 +20,7 @@ pub const DEFAULT_TREE_SIZE_MIB: usize = 64;
 #[cfg(feature = "large_tree_support")]
 pub const MAX_TREE_SIZE_MIB: usize = 67108864;
 #[cfg(not(feature = "large_tree_support"))]
-pub const MAX_TREE_SIZE_MIB: usize = 98304;
+pub const MAX_TREE_SIZE_MIB: usize = 65536;
 
 type PvList = ArrayVec<Move, { MAX_DEPTH as usize }>;
 
