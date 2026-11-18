@@ -5,6 +5,7 @@ edition = "2024"
 
 [features]
 pext = []
+large_tree_support = []
 
 [dependencies]
 arrayvec = "0.7.8"

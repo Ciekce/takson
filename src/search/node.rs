@@ -2,20 +2,27 @@ use crate::search::GameState;
 use crate::search::tree::TreeHalf;
 use crate::takmove::Move;
 
+#[cfg(feature = "large_tree_support")]
+type IndexType = u64;
+#[cfg(not(feature = "large_tree_support"))]
+type IndexType = u32;
+
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct NodeIndex {
-    inner: u32,
+    inner: IndexType,
 }
 
 impl NodeIndex {
-    const HALF_OFFSET: u32 = 31;
-    const HALF_MASK: u32 = 1 << Self::HALF_OFFSET;
+    const HALF_OFFSET: u32 = size_of::<IndexType>() as u32 * 8 - 1;
+
+    const HALF_MASK: IndexType = 1 << Self::HALF_OFFSET;
+    const IDX_MASK: IndexType = !Self::HALF_MASK;
 
     #[must_use]
-    pub const fn new(half: TreeHalf, idx: u32) -> Self {
-        debug_assert!((idx & Self::HALF_MASK) == 0);
+    pub const fn new(half: TreeHalf, idx: u64) -> Self {
+        debug_assert!((idx & !(Self::IDX_MASK as u64)) == 0);
         Self {
-            inner: ((half as u32) << Self::HALF_OFFSET) | idx,
+            inner: ((half as IndexType) << Self::HALF_OFFSET) | idx as IndexType,
         }
     }
 
@@ -97,8 +104,8 @@ impl Node {
     pub fn children(&self) -> ChildIterator {
         assert!(self.child_count > 0);
         let half = self.first_child_idx.half();
-        let start = self.first_child_idx.idx() as u32;
-        let end = start + self.child_count as u32;
+        let start = self.first_child_idx.idx() as u64;
+        let end = start + self.child_count as u64;
         ChildIterator { half, curr: start, end }
     }
 
@@ -129,8 +136,8 @@ impl Node {
 
 pub struct ChildIterator {
     half: TreeHalf,
-    curr: u32,
-    end: u32,
+    curr: u64,
+    end: u64,
 }
 
 impl Iterator for ChildIterator {

@@ -388,7 +388,7 @@ impl Tree {
 
     #[must_use]
     fn next_free_node_idx(&self) -> NodeIndex {
-        let idx = self.tree[self.active_half].len() as u32;
+        let idx = self.tree[self.active_half].len() as u64;
         NodeIndex::new(self.active_half, idx)
     }
 }

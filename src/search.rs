@@ -16,7 +16,11 @@ mod tree;
 pub const MAX_DEPTH: i32 = 255;
 
 pub const DEFAULT_TREE_SIZE_MIB: usize = 16;
-pub const MAX_TREE_SIZE_MIB: usize = 131072;
+
+#[cfg(feature = "large_tree_support")]
+pub const MAX_TREE_SIZE_MIB: usize = 67108864;
+#[cfg(not(feature = "large_tree_support"))]
+pub const MAX_TREE_SIZE_MIB: usize = 98304;
 
 type PvList = ArrayVec<Move, { MAX_DEPTH as usize }>;
 
