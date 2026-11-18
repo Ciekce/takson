@@ -127,6 +127,11 @@ impl Searcher {
                 break;
             }
 
+            if self.tree.root().visits == u32::MAX {
+                println!("info string Max root visits reached");
+                break;
+            }
+
             if average_depth >= max_depth || limits.should_stop(self.iters) {
                 break;
             }
