@@ -162,7 +162,7 @@ impl Searcher {
 
             for child_idx in self.tree.root().children() {
                 let node = self.tree.node(child_idx);
-                if node.visits > 0 && node.policy != f32::NEG_INFINITY {
+                if node.visits > 0 && !node.is_excluded() {
                     total_visits += node.visits as usize;
                     let score = 1.0 - node.q();
                     if score > highest_score {
@@ -195,7 +195,7 @@ impl Searcher {
             println!("info string root V: {} Q: {}{}", root.visits, root.q(), state);
             for child_idx in root.children() {
                 let node = self.tree.node(child_idx);
-                if node.policy == f32::NEG_INFINITY {
+                if node.is_excluded() {
                     break;
                 }
                 let q = match node.visits > 0 {
@@ -290,7 +290,7 @@ impl Searcher {
                 for child_idx in node.children() {
                     let child = self.tree.node(child_idx);
 
-                    if child.visits == 0 || child.policy == f32::NEG_INFINITY || excluded.contains(&child.mv.unwrap()) {
+                    if child.visits == 0 || child.is_excluded() || excluded.contains(&child.mv.unwrap()) {
                         continue;
                     }
 

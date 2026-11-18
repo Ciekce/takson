@@ -82,6 +82,11 @@ impl Node {
     }
 
     #[must_use]
+    pub fn is_excluded(&self) -> bool {
+        self.policy == f32::NEG_INFINITY
+    }
+
+    #[must_use]
     pub fn q(&self) -> f32 {
         assert!(self.visits > 0);
         match self.state {

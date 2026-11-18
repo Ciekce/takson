@@ -143,7 +143,7 @@ impl Tree {
         self.tree[self.active_half][1..root_child_count + 1].sort_by(|a, b| b.policy.partial_cmp(&a.policy).unwrap());
 
         let unexcluded_end = (1..root_child_count + 1)
-            .find(|&child_idx| self.tree[self.active_half][child_idx].policy == f32::NEG_INFINITY)
+            .find(|&child_idx| self.tree[self.active_half][child_idx].is_excluded())
             .unwrap_or(root_child_count + 1);
 
         let policy_entropy = self.normalize_policy(1..unexcluded_end);
