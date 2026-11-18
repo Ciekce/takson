@@ -15,7 +15,7 @@ mod tree;
 
 pub const MAX_DEPTH: i32 = 255;
 
-pub const DEFAULT_TREE_SIZE_MIB: usize = 16;
+pub const DEFAULT_TREE_SIZE_MIB: usize = 64;
 
 #[cfg(feature = "large_tree_support")]
 pub const MAX_TREE_SIZE_MIB: usize = 67108864;
