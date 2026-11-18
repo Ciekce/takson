@@ -1,5 +1,5 @@
 use crate::eval::value::eval_value;
-use crate::limit::Limits;
+use crate::limit::{Limits, SOFT_CHECK_INTERVAL};
 use crate::movegen::MoveList;
 use crate::position::{FlatCountOutcome, Position};
 use crate::search::node::NodeIndex;
@@ -132,7 +132,7 @@ impl Searcher {
                 break;
             }
 
-            if average_depth >= max_depth || limits.should_stop(self.iters) {
+            if average_depth >= max_depth || self.check_limits(&limits) {
                 break;
             }
 
@@ -152,6 +152,34 @@ impl Searcher {
 
     pub fn reset(&mut self) {
         self.tree.reset();
+    }
+
+    fn check_limits(&self, limits: &Limits) -> bool {
+        if self.iters.is_multiple_of(SOFT_CHECK_INTERVAL) {
+            let mut highest_score = f32::NEG_INFINITY;
+            let mut best_child_visits = 0;
+            let mut total_visits = 0;
+
+            for child_idx in self.tree.root().children() {
+                let node = self.tree.node(child_idx);
+                if node.visits > 0 && node.policy != f32::NEG_INFINITY {
+                    total_visits += node.visits as usize;
+                    let score = 1.0 - node.q();
+                    if score > highest_score {
+                        highest_score = score;
+                        best_child_visits = node.visits as usize;
+                    }
+                }
+            }
+
+            if limits.should_stop_soft(self.iters, best_child_visits, total_visits) {
+                return true;
+            }
+        } else if limits.should_stop_hard(self.iters) {
+            return true;
+        }
+
+        false
     }
 
     fn final_report(&self, start_time: Instant, iters: usize, depth: i32, seldepth: i32) {
