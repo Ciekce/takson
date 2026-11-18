@@ -15,8 +15,12 @@ mod tree;
 
 pub const MAX_DEPTH: i32 = 255;
 
-pub const DEFAULT_TREE_SIZE_MIB: usize = 16;
-pub const MAX_TREE_SIZE_MIB: usize = 131072;
+pub const DEFAULT_TREE_SIZE_MIB: usize = 64;
+
+#[cfg(feature = "large_tree_support")]
+pub const MAX_TREE_SIZE_MIB: usize = 67108864;
+#[cfg(not(feature = "large_tree_support"))]
+pub const MAX_TREE_SIZE_MIB: usize = 98304;
 
 type PvList = ArrayVec<Move, { MAX_DEPTH as usize }>;
 
@@ -124,6 +128,11 @@ impl Searcher {
                 break;
             }
 
+            if self.tree.root().visits == u32::MAX {
+                println!("info string Max root visits reached");
+                break;
+            }
+
             if average_depth >= max_depth || limits.should_stop(self.iters) {
                 break;
             }
@@ -183,8 +192,13 @@ impl Searcher {
         }
 
         if !self.tree.reused_tree() {
-            let child_visits: usize = self.tree.root().children().map(|idx| self.tree.node(idx).visits).sum();
-            assert_eq!(child_visits, self.tree.root().visits);
+            let child_visits: usize = self
+                .tree
+                .root()
+                .children()
+                .map(|idx| self.tree.node(idx).visits as usize)
+                .sum();
+            assert_eq!(child_visits, self.tree.root().visits as usize);
         }
 
         println!("bestmove {}", root_moves[0].pv[0]);
