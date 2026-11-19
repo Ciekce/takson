@@ -46,15 +46,44 @@ impl NodeIndex {
     }
 }
 
+pub struct NodeUpdateContext {
+    score: u32,
+    sq_score: u32,
+    inv_sq_score: u32,
+    d: u32,
+}
+
+impl NodeUpdateContext {
+    pub fn new(score: f32, d: f32) -> Self {
+        let sq_score = score.powi(2);
+        let inv_sq_score = (1.0 - score).powi(2);
+        Self {
+            score: Self::quantize(score),
+            sq_score: Self::quantize(sq_score),
+            inv_sq_score: Self::quantize(inv_sq_score),
+            d: Self::quantize(d),
+        }
+    }
+
+    pub fn flip(&mut self) {
+        self.score = (1u32 << 31) - self.score;
+        std::mem::swap(&mut self.sq_score, &mut self.inv_sq_score);
+    }
+
+    fn quantize(score: f32) -> u32 {
+        (score * (1u32 << 31) as f32).round() as u32
+    }
+}
+
 #[derive(Copy, Clone, Default, Debug)]
 pub struct Node {
     pub parent: NodeIndex,
     pub mv: Option<Move>,
     pub policy: f32,
     pub visits: u32,
-    pub total_score: f64,
-    pub total_sq_score: f32,
-    pub total_d: f32,
+    pub score: u32,
+    pub sq_score: u32,
+    pub d: u32,
     pub first_child_idx: NodeIndex,
     pub child_count: u16,
     pub state: Option<GameState>,
@@ -83,21 +112,43 @@ impl Node {
     }
 
     #[must_use]
+    pub fn is_excluded(&self) -> bool {
+        self.policy == f32::NEG_INFINITY
+    }
+
+    #[must_use]
+    fn q_internal(&self) -> f64 {
+        assert!(self.visits > 0);
+        self.score as f64 / (self.visits << self.visits.leading_zeros()) as f64
+    }
+
+    #[must_use]
+    fn sq_score_internal(&self) -> f64 {
+        assert!(self.visits > 0);
+        self.sq_score as f64 / (self.visits << self.visits.leading_zeros()) as f64
+    }
+
+    #[must_use]
+    fn d_internal(&self) -> f64 {
+        assert!(self.visits > 0);
+        self.d as f64 / (self.visits << self.visits.leading_zeros()) as f64
+    }
+
+    #[must_use]
     pub fn q(&self) -> f32 {
         assert!(self.visits > 0);
         match self.state {
             Some(GameState::Win(_)) => 1.0,
             Some(GameState::Draw) => 0.5,
             Some(GameState::Loss(_)) => 0.0,
-            _ => (self.total_score / self.visits as f64) as f32,
+            _ => self.q_internal() as f32,
         }
     }
 
     #[must_use]
     pub fn q_variance(&self) -> f32 {
         assert!(self.visits > 0);
-        let visits = self.visits as f64;
-        let var = self.total_sq_score as f64 / visits - (self.total_score / visits).powi(2);
+        let var = self.sq_score_internal() - self.q_internal().powi(2);
         var.max(0.0) as f32
     }
 
@@ -107,7 +158,7 @@ impl Node {
         match self.state {
             Some(GameState::Win(_) | GameState::Loss(_)) => 0.0,
             Some(GameState::Draw) => 1.0,
-            _ => self.total_d / self.visits as f32,
+            _ => self.d_internal() as f32,
         }
     }
 
@@ -134,11 +185,32 @@ impl Node {
         self.policy_entropy as f32 / 255.0
     }
 
-    pub fn update(&mut self, score: f32, d: f32) {
+    pub fn update(&mut self, ctx: &NodeUpdateContext) {
         self.visits += 1;
-        self.total_score += score as f64;
-        self.total_sq_score += score * score;
-        self.total_d += d;
+
+        let curr_score = if self.visits & (self.visits - 1) == 0 {
+            (self.score + 1) >> 1
+        } else {
+            self.score
+        };
+
+        let curr_sq_score = if self.visits & (self.visits - 1) == 0 {
+            (self.sq_score + 1) >> 1
+        } else {
+            self.sq_score
+        };
+
+        let curr_d = if self.visits & (self.visits - 1) == 0 {
+            (self.d + 1) >> 1
+        } else {
+            self.d
+        };
+
+        let shift = self.visits.ilog2();
+
+        self.score = curr_score + ((ctx.score + ((1 << shift) >> 1)) >> shift);
+        self.sq_score = curr_sq_score + ((ctx.sq_score + ((1 << shift) >> 1)) >> shift);
+        self.d = curr_d + ((ctx.d + ((1 << shift) >> 1)) >> shift);
     }
 
     pub fn set_state(&mut self, state: GameState) {

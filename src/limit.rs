@@ -4,7 +4,9 @@ use std::time::Instant;
 
 pub const MAX_MOVE_OVERHEAD_MS: u64 = 10000;
 
-const TIME_CHECK_INTERVAL: usize = 16;
+pub const SOFT_CHECK_INTERVAL: usize = 2048;
+
+const HARD_TIME_CHECK_INTERVAL: usize = 64;
 
 const MAX_STONES_IN_HAND: u8 = 62;
 const STONE_COMPLEXITY_SCALE: f64 = 5.0;
@@ -12,6 +14,7 @@ const STONE_COMPLEXITY_SCALE: f64 = 5.0;
 #[derive(Copy, Clone, Debug)]
 struct TimeManager {
     max_time: f64,
+    opt_time: f64,
 }
 
 impl TimeManager {
@@ -21,14 +24,28 @@ impl TimeManager {
         let stones_in_hand = pos.stones_in_hand(Color::Black) + pos.stones_in_hand(Color::White);
         let stones_on_board = MAX_STONES_IN_HAND.saturating_sub(stones_in_hand);
         let complexity_offset = STONE_COMPLEXITY_SCALE * stones_on_board as f64 / MAX_STONES_IN_HAND as f64;
-        let max_time = remaining * (17.5 + complexity_offset) / 400.0 + increment;
+        let base_time = remaining * (17.5 + complexity_offset) / 400.0 + increment;
 
-        let max_time = max_time.min(remaining * 0.8);
+        let max_time = remaining * 0.8;
+        let opt_time = base_time.min(max_time);
 
-        Self { max_time }
+        Self { max_time, opt_time }
     }
 
-    fn should_stop(&self, _nodes: usize, time: f64) -> bool {
+    fn should_stop_soft(&self, _nodes: usize, time: f64, best_child_visits: usize, total_visits: usize) -> bool {
+        if time >= self.max_time {
+            return true;
+        }
+
+        let mut scale = 1.0;
+
+        let best_child_visits_fraction = best_child_visits as f64 / total_visits as f64;
+        scale *= (1.3 - 0.4 * best_child_visits_fraction).max(0.5);
+
+        time >= self.opt_time * scale
+    }
+
+    fn should_stop_hard(&self, _nodes: usize, time: f64) -> bool {
         time >= self.max_time
     }
 }
@@ -82,7 +99,32 @@ impl Limits {
     }
 
     #[must_use]
-    pub fn should_stop(&self, nodes: usize) -> bool {
+    pub fn should_stop_soft(&self, nodes: usize, best_child_visits: usize, total_visits: usize) -> bool {
+        if let Some(max_nodes) = self.nodes
+            && nodes >= max_nodes
+        {
+            return true;
+        }
+
+        let time = self.start_time.elapsed().as_secs_f64();
+
+        if let Some(movetime) = self.movetime
+            && time >= movetime
+        {
+            return true;
+        }
+
+        if let Some(time_manager) = self.time_manager
+            && time_manager.should_stop_soft(nodes, time, best_child_visits, total_visits)
+        {
+            return true;
+        }
+
+        false
+    }
+
+    #[must_use]
+    pub fn should_stop_hard(&self, nodes: usize) -> bool {
         if let Some(max_nodes) = self.nodes
             && nodes >= max_nodes
         {
@@ -90,7 +132,7 @@ impl Limits {
         }
 
         if nodes > 0
-            && nodes.is_multiple_of(TIME_CHECK_INTERVAL)
+            && nodes.is_multiple_of(HARD_TIME_CHECK_INTERVAL)
             && (self.movetime.is_some() || self.time_manager.is_some())
         {
             let time = self.start_time.elapsed().as_secs_f64();
@@ -102,7 +144,7 @@ impl Limits {
             }
 
             if let Some(time_manager) = self.time_manager
-                && time_manager.should_stop(nodes, time)
+                && time_manager.should_stop_hard(nodes, time)
             {
                 return true;
             }

@@ -1,8 +1,8 @@
 use crate::eval::value::eval_value_qd;
-use crate::limit::Limits;
+use crate::limit::{Limits, SOFT_CHECK_INTERVAL};
 use crate::movegen::MoveList;
 use crate::position::{FlatCountOutcome, Position};
-use crate::search::node::NodeIndex;
+use crate::search::node::{NodeIndex, NodeUpdateContext};
 use crate::search::tree::Tree;
 use crate::takmove::Move;
 use crate::tei::{TeiOptions, score_to_cp, wdl_to_mu};
@@ -20,7 +20,7 @@ pub const DEFAULT_TREE_SIZE_MIB: usize = 64;
 #[cfg(feature = "large_tree_support")]
 pub const MAX_TREE_SIZE_MIB: usize = 67108864;
 #[cfg(not(feature = "large_tree_support"))]
-pub const MAX_TREE_SIZE_MIB: usize = 98304;
+pub const MAX_TREE_SIZE_MIB: usize = 65536;
 
 type PvList = ArrayVec<Move, { MAX_DEPTH as usize }>;
 
@@ -133,7 +133,7 @@ impl Searcher {
                 break;
             }
 
-            if average_depth >= max_depth || limits.should_stop(self.iters) {
+            if average_depth >= max_depth || self.check_limits(&limits) {
                 break;
             }
 
@@ -155,6 +155,34 @@ impl Searcher {
         self.tree.reset();
     }
 
+    fn check_limits(&self, limits: &Limits) -> bool {
+        if self.iters.is_multiple_of(SOFT_CHECK_INTERVAL) {
+            let mut highest_score = f32::NEG_INFINITY;
+            let mut best_child_visits = 0;
+            let mut total_visits = 0;
+
+            for child_idx in self.tree.root().children() {
+                let node = self.tree.node(child_idx);
+                if node.visits > 0 && !node.is_excluded() {
+                    total_visits += node.visits as usize;
+                    let score = 1.0 - node.q();
+                    if score > highest_score {
+                        highest_score = score;
+                        best_child_visits = node.visits as usize;
+                    }
+                }
+            }
+
+            if limits.should_stop_soft(self.iters, best_child_visits, total_visits) {
+                return true;
+            }
+        } else if limits.should_stop_hard(self.iters) {
+            return true;
+        }
+
+        false
+    }
+
     fn final_report(&self, start_time: Instant, iters: usize, depth: i32, seldepth: i32) {
         let root_moves = self.report(start_time, iters, depth, seldepth);
 
@@ -168,7 +196,7 @@ impl Searcher {
             println!("info string root V: {} Q: {}{}", root.visits, root.q(), state);
             for child_idx in root.children() {
                 let node = self.tree.node(child_idx);
-                if node.policy == f32::NEG_INFINITY {
+                if node.is_excluded() {
                     break;
                 }
                 let q = match node.visits > 0 {
@@ -277,7 +305,7 @@ impl Searcher {
                 for child_idx in node.children() {
                     let child = self.tree.node(child_idx);
 
-                    if child.visits == 0 || child.policy == f32::NEG_INFINITY || excluded.contains(&child.mv.unwrap()) {
+                    if child.visits == 0 || child.is_excluded() || excluded.contains(&child.mv.unwrap()) {
                         continue;
                     }
 
@@ -435,9 +463,12 @@ impl Searcher {
             .unwrap_or_else(|| eval_value_qd(&self.pos))
     }
 
-    fn backprop(&mut self, mut node_idx: NodeIndex, mut u: f32, d: f32) {
+    fn backprop(&mut self, mut node_idx: NodeIndex, u: f32, d: f32) {
         assert!(!node_idx.is_root());
+
+        let mut ctx = NodeUpdateContext::new(u, d);
         let mut child_state = GameState::Ongoing;
+
         loop {
             assert_eq!(node_idx.half(), self.tree.active_half());
 
@@ -448,14 +479,15 @@ impl Searcher {
                 node.set_state(GameState::Win(plies + 1));
             }
 
-            node.update(u, d);
+            node.update(&ctx);
 
             if node_idx.is_root() {
                 break;
             }
 
             node_idx = node.parent;
-            u = 1.0 - u;
+
+            ctx.flip();
             child_state = node.state.unwrap();
         }
     }
