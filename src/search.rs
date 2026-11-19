@@ -2,7 +2,7 @@ use crate::eval::value::eval_value;
 use crate::limit::{Limits, SOFT_CHECK_INTERVAL};
 use crate::movegen::MoveList;
 use crate::position::{FlatCountOutcome, Position};
-use crate::search::node::NodeIndex;
+use crate::search::node::{NodeIndex, NodeUpdateContext};
 use crate::search::tree::Tree;
 use crate::takmove::Move;
 use crate::tei::{TeiOptions, score_to_cp};
@@ -447,9 +447,12 @@ impl Searcher {
             .unwrap_or_else(|| eval_value(&self.pos))
     }
 
-    fn backprop(&mut self, mut node_idx: NodeIndex, mut u: f32) {
+    fn backprop(&mut self, mut node_idx: NodeIndex, u: f32) {
         assert!(!node_idx.is_root());
+
+        let mut ctx = NodeUpdateContext::new(u);
         let mut child_state = GameState::Ongoing;
+
         loop {
             assert_eq!(node_idx.half(), self.tree.active_half());
 
@@ -460,14 +463,15 @@ impl Searcher {
                 node.set_state(GameState::Win(plies + 1));
             }
 
-            node.update(u);
+            node.update(&ctx);
 
             if node_idx.is_root() {
                 break;
             }
 
             node_idx = node.parent;
-            u = 1.0 - u;
+
+            ctx.flip();
             child_state = node.state.unwrap();
         }
     }
