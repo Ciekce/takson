@@ -386,7 +386,7 @@ impl Searcher {
             let e = {
                 let mut e = cpuct;
 
-                e *= (node.visits as f32).sqrt();
+                e *= (0.546 * (node.visits as f32 + 1.0).ln()).exp();
                 e *= 1.0 + ((node.visits as f32 + 8192.0) / 8192.0).ln();
                 e *= (0.44 - 1.44 * node.policy_entropy().max(0.0001).ln()).min(2.2);
 
