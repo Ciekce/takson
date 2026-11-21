@@ -39,7 +39,7 @@ pub struct Searcher {
     key_history: Vec<u64>,
     root_key_history_len: usize,
     iters: usize,
-    selection_depth: i32,
+    selection: Vec<NodeIndex>,
 }
 
 impl Searcher {
@@ -53,7 +53,7 @@ impl Searcher {
             key_history: Vec::with_capacity(1024),
             root_key_history_len: 0,
             iters: 0,
-            selection_depth: 0,
+            selection: Vec::with_capacity(MAX_DEPTH as usize),
         }
     }
 
@@ -110,13 +110,15 @@ impl Searcher {
             assert!(!leaf.is_root());
             assert_eq!(leaf.half(), self.tree.active_half());
 
+            let selection_depth = self.selection.len() - 1;
+
             let u = self.simulate(leaf);
-            self.backprop(leaf, u);
+            self.backprop(u);
 
             self.iters += 1;
 
-            depth_total += self.selection_depth as u64;
-            depth_max = depth_max.max(self.selection_depth);
+            depth_total += selection_depth;
+            depth_max = depth_max.max(selection_depth as i32);
 
             let new_average_depth = (depth_total as f64 / self.iters as f64).round() as i32;
             let should_report_depth = new_average_depth > average_depth;
@@ -143,6 +145,11 @@ impl Searcher {
                 self.report(start_time, self.iters, average_depth, depth_max);
                 last_report_iter = iter_idx;
             }
+        }
+
+        if self.selection.capacity() > MAX_DEPTH as usize {
+            self.selection.shrink_to_fit();
+            self.selection.reserve(MAX_DEPTH as usize);
         }
 
         if !options.silent {
@@ -345,6 +352,8 @@ impl Searcher {
 
         let mut curr = self.tree.root_idx();
         loop {
+            self.selection.push(curr);
+
             if !curr.is_root() {
                 self.key_history.push(self.pos.key());
                 self.pos.apply_move(self.tree.node(curr).mv.unwrap());
@@ -375,8 +384,6 @@ impl Searcher {
                 curr = self.tree.root_idx();
                 continue;
             }
-
-            self.selection_depth += 1;
 
             let node = self.tree.node(curr);
 
@@ -447,13 +454,13 @@ impl Searcher {
             .unwrap_or_else(|| eval_value(&self.pos))
     }
 
-    fn backprop(&mut self, mut node_idx: NodeIndex, u: f32) {
-        assert!(!node_idx.is_root());
+    fn backprop(&mut self, u: f32) {
+        assert!(self.selection.len() > 1);
 
         let mut ctx = NodeUpdateContext::new(u);
         let mut child_state = GameState::Ongoing;
 
-        loop {
+        while let Some(node_idx) = self.selection.pop() {
             assert_eq!(node_idx.half(), self.tree.active_half());
 
             let node = self.tree.node_mut(node_idx);
@@ -469,8 +476,6 @@ impl Searcher {
                 break;
             }
 
-            node_idx = node.parent;
-
             ctx.flip();
             child_state = node.state.unwrap();
         }
@@ -479,7 +484,7 @@ impl Searcher {
     fn reset_selection(&mut self) {
         self.pos = self.root_pos;
         self.key_history.truncate(self.root_key_history_len);
-        self.selection_depth = 0;
+        self.selection.clear();
     }
 }
 

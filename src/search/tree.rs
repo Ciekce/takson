@@ -111,10 +111,8 @@ impl Tree {
             let mut moves = MoveList::new();
             generate_moves(&mut moves, root_pos);
 
-            let root_idx = self.root_idx();
-
             for &mv in moves.iter() {
-                self.tree[self.active_half].push(Node::new(root_idx, mv, 0.0));
+                self.tree[self.active_half].push(Node::new(mv, 0.0));
             }
 
             let active_half = self.active_half;
@@ -206,15 +204,13 @@ impl Tree {
         self.tree[self.active_half].clear();
         self.tree[self.active_half].push(*src);
 
-        self.tree[self.active_half][0].parent = Default::default();
         self.tree[self.active_half][0].mv = None;
 
         let first_child_idx = self.next_free_node_idx();
 
         for child_idx in src.children() {
             assert_eq!(child_idx.half(), src_half);
-            let mut child = *self.node(child_idx);
-            child.parent = self.root_idx();
+            let child = *self.node(child_idx);
             self.tree[self.active_half].push(child);
         }
 
@@ -282,7 +278,7 @@ impl Tree {
         let policy_ctx = PolicyContext::new(pos);
         for &mv in moves.iter() {
             let policy = self.get_policy(&policy_ctx, pos, mv, false);
-            self.tree[self.active_half].push(Node::new(node_idx, mv, policy));
+            self.tree[self.active_half].push(Node::new(mv, policy));
         }
 
         let policy_entropy = self.normalize_policy(first_child_idx.idx()..self.tree[self.active_half].len());
@@ -364,9 +360,8 @@ impl Tree {
         let first_child_idx = self.next_free_node_idx();
 
         for child_idx in node.children() {
-            let mut node = *self.node(child_idx);
-            node.parent = node_idx;
-            self.tree[self.active_half].push(node);
+            let child = *self.node(child_idx);
+            self.tree[self.active_half].push(child);
         }
 
         self.node_mut(node_idx).first_child_idx = first_child_idx;
