@@ -403,15 +403,15 @@ impl Searcher {
 
                 // if we just expanded we want to pick the highest policy child
                 let mut max_policy = f32::NEG_INFINITY;
-                let mut best_child = Default::default();
+                let mut best_child = None;
                 for child_idx in self.tree.node(curr).children() {
                     let child = self.tree.node(child_idx);
                     if child.policy > max_policy {
                         max_policy = child.policy;
-                        best_child = child_idx;
+                        best_child = Some(child_idx);
                     }
                 }
-                curr = best_child;
+                curr = best_child.expect("surely there is at least one child (clueless)");
                 continue;
             }
 
@@ -471,20 +471,23 @@ impl Searcher {
 
                 improved_logits.push(improved_logit);
             }
+            assert!(max_improved_logit.is_normal());
             // do softmax to it
             for logit in &mut improved_logits {
                 *logit = (*logit - max_improved_logit).exp();
             }
             let softmax_denominator: f32 = improved_logits.iter().sum();
+            let softmax_recip = softmax_denominator.recip();
+            assert!(softmax_recip.is_normal());
             for exp_logit in &mut improved_logits {
-                *exp_logit /= softmax_denominator;
+                *exp_logit *= softmax_recip;
             }
             let improved_policy = improved_logits;
 
             let mut proven_loss = true;
             let mut longest_loss = i16::MIN;
 
-            let mut best_child = Default::default();
+            let mut best_child = None;
             let mut best_error = f32::NEG_INFINITY;
 
             for (child_idx, improved_pol) in node.children().zip(improved_policy) {
@@ -498,9 +501,11 @@ impl Searcher {
 
                 // pick action which maximizes error between improved policy and visit distribution
                 // i.e. we want the visit distribution to resemble the improved policy
+                assert!(improved_pol <= 1.0);
+                assert!(improved_pol >= 0.0);
                 let error = improved_pol - (child.visits as f32 * recip_total_visits);
                 if error > best_error {
-                    best_child = child_idx;
+                    best_child = Some(child_idx);
                     best_error = error;
                 }
             }
@@ -509,7 +514,7 @@ impl Searcher {
                 self.tree.node_mut(curr).set_state(GameState::Loss(longest_loss + 1));
             }
 
-            curr = best_child;
+            curr = best_child.expect("surely there is at least one child (clueless)");
         }
 
         assert!(!curr.is_root());
