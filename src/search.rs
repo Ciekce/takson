@@ -195,34 +195,51 @@ impl Searcher {
 
         if self.options.report_root_stats && !self.options.silent && !self.options.minimal {
             println!();
+
             let root = self.tree.root();
             let state = match root.state {
                 Some(state) if state != GameState::Ongoing => format!(" S: {:?}", state),
                 _ => "".to_string(),
             };
-            println!("info string root V: {} Q: {}{}", root.visits, root.q(), state);
+
+            println!("info string root V: {}, Q: {:.04}{}", root.visits, root.q(), state);
+
             for child_idx in root.children() {
                 let node = self.tree.node(child_idx);
                 if node.is_excluded() {
                     break;
                 }
-                let q = match node.visits > 0 {
-                    true => (1.0 - node.q()).to_string(),
-                    false => "n/a".to_string(),
+
+                let (mu, q, d) = match node.visits > 0 {
+                    true => {
+                        let q = 1.0 - node.q();
+                        let d = node.d();
+
+                        let w = (q - d / 2.0).max(0.0);
+                        let mu = wdl_to_mu(w, d, 1.0 - w - d);
+
+                        (format!("{:+.2}", mu), format!("{:.4}", q), format!("{:.3}%", d * 100.0))
+                    }
+                    false => ("n/a".to_string(), "n/a".to_string(), "n/a".to_string()),
                 };
+
                 let state = match node.state {
                     Some(state) if state != GameState::Ongoing => format!(" S: {:?}", state.flip()),
                     _ => "".to_string(),
                 };
+
                 println!(
-                    "info string {} V: {}, Q: {} P: {}%{}",
+                    "info string {} V: {}, mu: {}, Q: {}, D: {}, P: {:.3}%{}",
                     node.mv.unwrap(),
                     node.visits,
+                    mu,
                     q,
+                    d,
                     node.policy * 100.0,
                     state
                 );
             }
+
             println!();
         }
 
