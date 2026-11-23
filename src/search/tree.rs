@@ -324,25 +324,26 @@ impl Tree {
     }
 
     fn normalize_policy(&mut self, nodes: Range<usize>) -> f32 {
-        let nodes = &mut self.tree[self.active_half][nodes];
+        return 0.0;
+        // let nodes = &mut self.tree[self.active_half][nodes];
 
-        let max = nodes.iter().map(|node| node.policy).reduce(f32::max).unwrap();
+        // let max = nodes.iter().map(|node| node.policy).reduce(f32::max).unwrap();
 
-        let mut total = 0.0;
+        // let mut total = 0.0;
 
-        for node in nodes.iter_mut() {
-            node.policy = (node.policy - max).exp();
-            total += node.policy;
-        }
+        // for node in nodes.iter_mut() {
+        //     node.policy = (node.policy - max).exp();
+        //     total += node.policy;
+        // }
 
-        let mut sum_of_squares = 0.0;
+        // let mut sum_of_squares = 0.0;
 
-        for node in nodes.iter_mut() {
-            node.policy /= total;
-            sum_of_squares += node.policy * node.policy;
-        }
+        // for node in nodes.iter_mut() {
+        //     node.policy /= total;
+        //     sum_of_squares += node.policy * node.policy;
+        // }
 
-        (1.0 - sum_of_squares).clamp(0.0, 1.0)
+        // (1.0 - sum_of_squares).clamp(0.0, 1.0)
     }
 
     pub fn copy_children_over(&mut self, node_idx: NodeIndex) -> bool {

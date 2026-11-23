@@ -466,13 +466,12 @@ impl Searcher {
             let mut improved_logits = ArrayVec::<_, 2048>::new();
             for child_idx in node.children() {
                 let child = self.tree.node(child_idx);
-                let log_policy = child.policy.ln(); // if you want to use this probably just store raw logits instead
 
                 let q = if child.visits > 0 { 1.0 - child.q() } else { fpu };
                 let normalized_q = q * q_scale;
                 let scaled_q = scaling * normalized_q;
 
-                let improved_logit = log_policy + scaled_q;
+                let improved_logit = child.policy + scaled_q;
                 max_improved_logit = max_improved_logit.max(improved_logit);
 
                 improved_logits.push(improved_logit);
