@@ -6,7 +6,7 @@ use crate::position::Position;
 
 const L1_SIZE: usize = 2560;
 const L2_SIZE: usize = 32;
-const L3_SIZE: usize = 32;
+const L3_SIZE: usize = 64;
 const OUTPUTS: usize = 3;
 
 #[cfg(target_feature = "avx512f")]
@@ -74,7 +74,7 @@ pub fn eval_value_raw(pos: &Position) -> (f32, f32, f32) {
         }
     }
 
-    let mut l1_out = Align64([0i16; L2_SIZE]);
+    let mut l1_out = Align64([0i16; L3_SIZE]);
     let skips;
     {
         let l1_bias = NET.l1b[output_bucket].as_ptr();
