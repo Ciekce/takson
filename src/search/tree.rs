@@ -306,7 +306,6 @@ impl Tree {
             return -500.0;
         } else {
             match new_pos.count_flats() {
-                FlatCountOutcome::Draw => return 0.0,
                 FlatCountOutcome::Win(side) if side == pos.stm() => return 500.0,
                 FlatCountOutcome::Win(side) if side == pos.stm().flip() => return -500.0,
                 _ => {}
