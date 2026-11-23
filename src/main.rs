@@ -1,6 +1,7 @@
 mod bitboard;
 mod core;
 mod eval;
+mod fastmath;
 mod hits;
 mod keys;
 mod limit;

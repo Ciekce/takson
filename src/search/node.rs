@@ -50,16 +50,18 @@ pub struct NodeUpdateContext {
     score: u32,
     sq_score: u32,
     inv_sq_score: u32,
+    d: u32,
 }
 
 impl NodeUpdateContext {
-    pub fn new(score: f32) -> Self {
+    pub fn new(score: f32, d: f32) -> Self {
         let sq_score = score.powi(2);
         let inv_sq_score = (1.0 - score).powi(2);
         Self {
             score: Self::quantize(score),
             sq_score: Self::quantize(sq_score),
             inv_sq_score: Self::quantize(inv_sq_score),
+            d: Self::quantize(d),
         }
     }
 
@@ -80,6 +82,7 @@ pub struct Node {
     pub visits: u32,
     pub score: u32,
     pub sq_score: u32,
+    pub d: u32,
     pub first_child_idx: NodeIndex,
     pub child_count: u16,
     pub state: Option<GameState>,
@@ -123,6 +126,12 @@ impl Node {
     }
 
     #[must_use]
+    fn d_internal(&self) -> f64 {
+        assert!(self.visits > 0);
+        self.d as f64 / (self.visits << self.visits.leading_zeros()) as f64
+    }
+
+    #[must_use]
     pub fn q(&self) -> f32 {
         assert!(self.visits > 0);
         match self.state {
@@ -138,6 +147,16 @@ impl Node {
         assert!(self.visits > 0);
         let var = self.sq_score_internal() - self.q_internal().powi(2);
         var.max(0.0) as f32
+    }
+
+    #[must_use]
+    pub fn d(&self) -> f32 {
+        assert!(self.visits > 0);
+        match self.state {
+            Some(GameState::Win(_) | GameState::Loss(_)) => 0.0,
+            Some(GameState::Draw) => 1.0,
+            _ => self.d_internal() as f32,
+        }
     }
 
     #[must_use]
@@ -178,10 +197,17 @@ impl Node {
             self.sq_score
         };
 
+        let curr_d = if self.visits & (self.visits - 1) == 0 {
+            (self.d + 1) >> 1
+        } else {
+            self.d
+        };
+
         let shift = self.visits.ilog2();
 
         self.score = curr_score + ((ctx.score + ((1 << shift) >> 1)) >> shift);
         self.sq_score = curr_sq_score + ((ctx.sq_score + ((1 << shift) >> 1)) >> shift);
+        self.d = curr_d + ((ctx.d + ((1 << shift) >> 1)) >> shift);
     }
 
     pub fn set_state(&mut self, state: GameState) {

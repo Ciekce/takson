@@ -1,11 +1,13 @@
 use super::simd::*;
 use crate::core::Color;
 use crate::eval::*;
+use crate::fastmath;
 use crate::position::Position;
 
 const L1_SIZE: usize = 2560;
 const L2_SIZE: usize = 32;
 const L3_SIZE: usize = 32;
+const OUTPUTS: usize = 3;
 
 #[cfg(target_feature = "avx512f")]
 const UPDATE_CHUNK: usize = L1_SIZE / 4;
@@ -32,8 +34,8 @@ struct Network {
     l1b: [[i32; L2_SIZE]; OUTPUT_BUCKET_COUNT],
     l2w: [[i16; L2_SIZE * L3_SIZE]; OUTPUT_BUCKET_COUNT],
     l2b: [[i32; L3_SIZE]; OUTPUT_BUCKET_COUNT],
-    l3w: [[i32; L3_SIZE]; OUTPUT_BUCKET_COUNT],
-    l3b: [i32; OUTPUT_BUCKET_COUNT],
+    l3w: [[[i32; L3_SIZE]; OUTPUTS]; OUTPUT_BUCKET_COUNT],
+    l3b: [[i32; OUTPUTS]; OUTPUT_BUCKET_COUNT],
 }
 
 static NET: Network = unsafe { std::mem::transmute(*include_bytes!(env!("EVALFILE"))) };
@@ -43,7 +45,7 @@ const SHIFT: i32 = Q0_BITS * 2 + MULHI_SHIFT + Q1_BITS - Q_BITS;
 const L2_UNROLL: usize = 8 / (L2_SIZE / CHUNK_SIZE_I32);
 
 #[must_use]
-pub fn eval_value(pos: &Position) -> f32 {
+pub fn eval_value_raw(pos: &Position) -> (f32, f32, f32) {
     let output_bucket = calc_output_bucket(pos);
 
     let acc = accumulate(pos);
@@ -73,7 +75,7 @@ pub fn eval_value(pos: &Position) -> f32 {
     }
 
     let mut l1_out = Align64([0i16; L2_SIZE]);
-    let skip;
+    let skips;
     {
         let l1_bias = NET.l1b[output_bucket].as_ptr();
 
@@ -85,7 +87,7 @@ pub fn eval_value(pos: &Position) -> f32 {
             }
         }
 
-        skip = to_array_i32(biased[0])[0];
+        skips = to_array_i32(biased[0]);
 
         let hi = set1_i16(1 << (SHIFT + Q_BITS));
 
@@ -116,10 +118,10 @@ pub fn eval_value(pos: &Position) -> f32 {
 
     let l2_intermediate = l2_intermediate.map(reduce_dpwssd_i32);
 
-    let mut l3_sum = zero_i32();
+    let mut l3_sums = [zero_i32(); OUTPUTS];
     {
         let l2_biases = NET.l2b[output_bucket].as_ptr();
-        let l3_weights = NET.l3w[output_bucket].as_ptr();
+        let l3_weights = &NET.l3w[output_bucket];
 
         let skip_values = l1_out.0.as_ptr();
 
@@ -128,7 +130,6 @@ pub fn eval_value(pos: &Position) -> f32 {
 
         for (i, &intermediate) in l2_intermediate.iter().enumerate() {
             let l2_bias = unsafe { load_i32(l2_biases.add(i * CHUNK_SIZE_I32)) };
-            let l3_weight = unsafe { load_i32(l3_weights.add(i * CHUNK_SIZE_I32)) };
 
             let skip = unsafe { load_widen_i16_i32(skip_values.add(i * CHUNK_SIZE_I32)) };
 
@@ -136,17 +137,59 @@ pub fn eval_value(pos: &Position) -> f32 {
             let activated = min_i32(max_i32(biased, lo), hi3);
             let skipped = add_i32(shift_left_i32::<Q_BITS>(skip), activated);
 
-            l3_sum = add_i32(l3_sum, mul_i32(skipped, l3_weight));
+            for (l3_sum, l3_weights) in l3_sums.iter_mut().zip(l3_weights) {
+                let l3_weight = unsafe { load_i32(l3_weights.as_ptr().add(i * CHUNK_SIZE_I32)) };
+                *l3_sum = add_i32(*l3_sum, mul_i32(skipped, l3_weight));
+            }
         }
     }
 
-    let bias = NET.l3b[output_bucket];
-    let skip = i64::from(skip) * i64::from(Q * Q * Q * Q / (Q * 256));
+    let biases = NET.l3b[output_bucket];
+    const SKIP_SCALE: i32 = Q * Q * Q * Q / (Q * 256);
+    const OUT_SCALE: f32 = 1.0 / (Q * Q * Q * Q) as f32;
 
-    let out = i64::from(hsum_i32(l3_sum) + bias) + skip;
-    let out = (out as f64 / f64::from(Q * Q * Q * Q)) as f32;
+    let [l, d, w] =
+        std::array::from_fn(|i| ((hsum_i32(l3_sums[i]) + biases[i]) + skips[i] * SKIP_SCALE) as f32 * OUT_SCALE);
 
-    1.0 / (1.0 + (-out).exp())
+    (w, d, l)
+}
+
+// slower, use qd for search
+#[must_use]
+pub fn eval_value_wdl(pos: &Position) -> (f32, f32, f32) {
+    let (mut w, mut d, mut l) = eval_value_raw(pos);
+
+    let max = w.max(d).max(l);
+
+    w -= max;
+    d -= max;
+    l -= max;
+
+    w = w.exp();
+    d = d.exp();
+    l = l.exp();
+
+    let sum = w + d + l;
+
+    (w / sum, d / sum, l / sum)
+}
+
+#[must_use]
+pub fn eval_value_qd(pos: &Position) -> (f32, f32) {
+    let (w, d, l) = eval_value_raw(pos);
+
+    let max = w.max(d).max(l);
+
+    let w = fastmath::exp(w - max);
+    let d = fastmath::exp(d - max);
+    let l = fastmath::exp(l - max);
+
+    let inv_sum = 1.0 / (w + d + l);
+
+    let w = w * inv_sum;
+    let d = d * inv_sum;
+
+    (w + d * 0.5, d)
 }
 
 #[must_use]

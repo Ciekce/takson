@@ -1,6 +1,6 @@
 use crate::core::Color;
 use crate::eval::policy::PolicyContext;
-use crate::eval::value::eval_value;
+use crate::eval::value::eval_value_wdl;
 use crate::limit::{Limits, MAX_MOVE_OVERHEAD_MS};
 use crate::movegen::{MoveList, generate_moves};
 use crate::perft::{perft, split_perft};
@@ -47,16 +47,25 @@ const BENCH_POSITIONS: [&str; 25] = [
 ];
 
 #[must_use]
-pub fn score_to_cp(score: f32) -> i32 {
-    const CP_SCALE: f32 = 160.0;
-    match score {
-        0.0 => -25000,
-        1.0 => 25000,
-        _ => {
-            let cp = CP_SCALE * (score / (1.0 - score)).ln();
-            cp.clamp(-24999.0, 24999.0).round() as i32
-        }
-    }
+pub fn wdl_to_mu(w: f32, d: f32, l: f32) -> f32 {
+    const EPSILON: f32 = 0.001;
+
+    let d = d.max(EPSILON);
+
+    let mut w = w.max(EPSILON);
+    let mut l = l.max(EPSILON);
+
+    let sum = w + d + l;
+
+    w /= sum;
+    l /= sum;
+
+    let a = ((1.0 / l) - 1.0).ln();
+    let b = ((1.0 / w) - 1.0).ln();
+
+    let mu = (a - b) / (a + b);
+
+    mu.clamp(-249.99, 249.99)
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -145,6 +154,7 @@ impl TeiHandler {
                 "move" => self.handle_move(args),
                 "d" => self.handle_d(),
                 "eval" => self.handle_eval(),
+                "raweval" => self.handle_raweval(),
                 "policy" => self.handle_policy(),
                 "perft" => self.handle_perft(args),
                 "splitperft" => self.handle_splitperft(args),
@@ -618,21 +628,46 @@ impl TeiHandler {
         println!("TPS: {}", self.pos.tps());
         println!("Key: {:016x}", self.pos.key());
 
-        let value = eval_value(&self.pos);
-        let value = match self.pos.stm() {
-            Color::White => value,
-            Color::Black => 1.0 - value,
+        let (w, d, l) = eval_value_wdl(&self.pos);
+        let (w, d, l) = match self.pos.stm() {
+            Color::White => (w, d, l),
+            Color::Black => (l, d, w),
         };
 
-        let cp = score_to_cp(value);
+        let q = w + d / 2.0;
+        let mu = wdl_to_mu(w, d, l);
 
-        println!("Value (white-relative): {:.6} ({})", value, cp as f64 / 100.0);
+        println!("Q (white-relative): {:.6}", q);
+        println!(
+            "WDL (white-relative): {:.2}%, {:.2}%, {:.2}%",
+            w * 100.0,
+            d * 100.0,
+            l * 100.0
+        );
+        println!("Mu (white-relative): {:+.2}", mu);
     }
 
     fn handle_eval(&self) {
-        let value = eval_value(&self.pos);
-        let cp = score_to_cp(value);
-        println!("Value (stm-relative): {:.6} ({})", value, cp as f64 / 100.0);
+        let (w, d, l) = eval_value_wdl(&self.pos);
+
+        let q = w + d / 2.0;
+        let mu = wdl_to_mu(w, d, l);
+
+        println!("Q (stm-relative): {:.6}", q);
+        println!(
+            "WDL (stm-relative): {:.2}%, {:.2}%, {:.2}%",
+            w * 100.0,
+            d * 100.0,
+            l * 100.0
+        );
+        println!("Mu (stm-relative): {:+.2}", mu);
+    }
+
+    fn handle_raweval(&self) {
+        let (w, d, l) = eval_value_wdl(&self.pos);
+        println!("W: {}", w);
+        println!("D: {}", d);
+        println!("L: {}", l);
     }
 
     fn handle_policy(&self) {
