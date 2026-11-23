@@ -446,7 +446,13 @@ impl Searcher {
                 }
             }
             let q_diff = q_max - q_min;
-            let q_scale = if q_diff != 0.0 { q_diff.recip() } else { fpu.recip() };
+            let q_scale = if q_diff != 0.0 {
+                q_diff.recip()
+            } else if fpu != 0.0 {
+                fpu.recip()
+            } else {
+                1.0
+            };
             let scaling = sigma_scaling(max_visits);
             // debug_assert!(total_visits > 0); // this is false at root but otherwise should be true
             let recip_total_visits = if total_visits != 0 {
