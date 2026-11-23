@@ -77,7 +77,6 @@ impl NodeUpdateContext {
 
 #[derive(Copy, Clone, Default, Debug)]
 pub struct Node {
-    pub parent: NodeIndex,
     pub mv: Option<Move>,
     pub policy: f32,
     pub visits: u32,
@@ -92,9 +91,8 @@ pub struct Node {
 
 impl Node {
     #[must_use]
-    pub fn new(parent: NodeIndex, mv: Move, policy: f32) -> Self {
+    pub fn new(mv: Move, policy: f32) -> Self {
         Self {
-            parent,
             mv: Some(mv),
             policy,
             ..Default::default()
@@ -104,7 +102,6 @@ impl Node {
     #[must_use]
     pub fn new_root() -> Self {
         Self {
-            parent: Default::default(),
             mv: None,
             policy: 0.0,
             ..Default::default()
