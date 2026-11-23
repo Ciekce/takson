@@ -224,7 +224,7 @@ impl Searcher {
                 };
 
                 let state = match node.state {
-                    Some(state) if state != GameState::Ongoing => format!(" S: {:?}", state.flip()),
+                    Some(state) if state != GameState::Ongoing => format!(", S: {:?}", state.flip()),
                     _ => "".to_string(),
                 };
 
