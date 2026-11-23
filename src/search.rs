@@ -5,7 +5,7 @@ use crate::position::{FlatCountOutcome, Position};
 use crate::search::node::{NodeIndex, NodeUpdateContext};
 use crate::search::tree::Tree;
 use crate::takmove::Move;
-use crate::tei::{TeiOptions, score_to_cp, wdl_to_mu};
+use crate::tei::{TeiOptions, wdl_to_mu};
 use arrayvec::ArrayVec;
 use std::collections::HashSet;
 use std::time::Instant;

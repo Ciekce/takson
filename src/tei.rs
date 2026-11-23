@@ -47,19 +47,6 @@ const BENCH_POSITIONS: [&str; 25] = [
 ];
 
 #[must_use]
-pub fn score_to_cp(score: f32) -> i32 {
-    const CP_SCALE: f32 = 160.0;
-    match score {
-        0.0 => -25000,
-        1.0 => 25000,
-        _ => {
-            let cp = CP_SCALE * (score / (1.0 - score)).ln();
-            cp.clamp(-24999.0, 24999.0).round() as i32
-        }
-    }
-}
-
-#[must_use]
 pub fn wdl_to_mu(w: f32, d: f32, l: f32) -> f32 {
     const EPSILON: f32 = 0.001;
 
@@ -647,12 +634,10 @@ impl TeiHandler {
             Color::Black => (l, d, w),
         };
 
-        let value = w + d / 2.0;
-
-        let cp = score_to_cp(value);
+        let q = w + d / 2.0;
         let mu = wdl_to_mu(w, d, l);
 
-        println!("Q (white-relative): {:.6} ({:+})", value, cp as f64 / 100.0);
+        println!("Q (white-relative): {:.6}", q);
         println!(
             "WDL (white-relative): {:.2}%, {:.2}%, {:.2}%",
             w * 100.0,
@@ -665,12 +650,10 @@ impl TeiHandler {
     fn handle_eval(&self) {
         let (w, d, l) = eval_value_wdl(&self.pos);
 
-        let value = w + d / 2.0;
-
-        let cp = score_to_cp(value);
+        let q = w + d / 2.0;
         let mu = wdl_to_mu(w, d, l);
 
-        println!("Q (stm-relative): {:.6} ({:+})", value, cp as f64 / 100.0);
+        println!("Q (stm-relative): {:.6}", q);
         println!(
             "WDL (stm-relative): {:.2}%, {:.2}%, {:.2}%",
             w * 100.0,
