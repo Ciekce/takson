@@ -4,13 +4,13 @@ use crate::eval::*;
 use crate::fastmath;
 use crate::position::Position;
 
-const L1_SIZE: usize = 2560;
+const L1_SIZE: usize = 4096;
 const L2_SIZE: usize = 32;
 const L3_SIZE: usize = 64;
 const OUTPUTS: usize = 3;
 
 #[cfg(target_feature = "avx512f")]
-const UPDATE_CHUNK: usize = L1_SIZE / 4;
+const UPDATE_CHUNK: usize = 512;
 #[cfg(not(target_feature = "avx512f"))]
 const UPDATE_CHUNK: usize = 256;
 
