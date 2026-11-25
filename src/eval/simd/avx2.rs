@@ -30,6 +30,12 @@ pub unsafe fn store_u8(ptr: *mut u8, vec: VecU8) {
 
 #[must_use]
 #[inline(always)]
+pub unsafe fn load_u8(ptr: *const u8) -> VecU8 {
+    unsafe { _mm256_load_si256(ptr.cast()) }
+}
+
+#[must_use]
+#[inline(always)]
 pub unsafe fn load_i8(ptr: *const i8) -> VecI8 {
     unsafe { _mm256_load_si256(ptr.cast()) }
 }
@@ -87,6 +93,12 @@ pub fn mulhi_i16(a: VecI16, b: VecI16) -> VecI16 {
 #[inline(always)]
 pub fn mulhi_shift_i16<const SHIFT: i32>(a: VecI16, b: VecI16) -> VecI16 {
     unsafe { _mm256_mulhrs_epi16(_mm256_sll_epi16(a, _mm_cvtsi32_si128(SHIFT - 1)), b) }
+}
+
+#[must_use]
+#[inline(always)]
+pub fn adds_i16(a: VecI16, b: VecI16) -> VecI16 {
+    unsafe { _mm256_adds_epi16(a, b) }
 }
 
 #[must_use]

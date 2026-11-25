@@ -57,11 +57,11 @@ fn reserves_feature_idx(perspective: Color, side: Color, reserves: u8) -> usize 
 }
 
 #[repr(C, align(64))]
-struct FeatureTransformer<const L1_SIZE: usize> {
-    w_top: [[i16; L1_SIZE]; TOP_INPUT_SIZE],
-    w_stack: [[i16; L1_SIZE]; STACK_INPUT_SIZE],
-    w_reserves: [[i16; L1_SIZE]; RESERVES_INPUT_SIZE],
-    b: [i16; L1_SIZE],
+struct FeatureTransformer<const L1_SIZE: usize, T = i16> {
+    w_top: [[T; L1_SIZE]; TOP_INPUT_SIZE],
+    w_stack: [[T; L1_SIZE]; STACK_INPUT_SIZE],
+    w_reserves: [[T; L1_SIZE]; RESERVES_INPUT_SIZE],
+    b: [T; L1_SIZE],
 }
 
 #[repr(C, align(64))]
@@ -118,9 +118,9 @@ fn activate_ft<const L1_SIZE: usize, const L1_PAIR_COUNT: usize>(dst: &mut [u8; 
 const MAX_UPDATE_ROWS: usize = 128;
 
 #[derive(Default)]
-struct Updates<const L1_SIZE: usize, const UPDATE_CHUNK: usize> {
-    adds: ArrayVec<&'static [i16; L1_SIZE], MAX_UPDATE_ROWS>,
-    subs: ArrayVec<&'static [i16; L1_SIZE], MAX_UPDATE_ROWS>,
+struct Updates<const L1_SIZE: usize, const UPDATE_CHUNK: usize, T: 'static = i16> {
+    adds: ArrayVec<&'static [T; L1_SIZE], MAX_UPDATE_ROWS>,
+    subs: ArrayVec<&'static [T; L1_SIZE], MAX_UPDATE_ROWS>,
 }
 
 impl<const L1_SIZE: usize, const UPDATE_CHUNK: usize> Updates<L1_SIZE, UPDATE_CHUNK> {
@@ -153,9 +153,9 @@ impl<const L1_SIZE: usize, const UPDATE_CHUNK: usize> Updates<L1_SIZE, UPDATE_CH
     }
 }
 
-fn gather_rows<const L1_SIZE: usize, const UPDATE_CHUNK: usize>(
-    rows: &mut Updates<L1_SIZE, UPDATE_CHUNK>,
-    ft: &'static FeatureTransformer<L1_SIZE>,
+fn gather_rows<const L1_SIZE: usize, const UPDATE_CHUNK: usize, T>(
+    rows: &mut Updates<L1_SIZE, UPDATE_CHUNK, T>,
+    ft: &'static FeatureTransformer<L1_SIZE, T>,
     pos: &Position,
 ) {
     let perspective = pos.stm();

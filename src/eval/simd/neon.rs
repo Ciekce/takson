@@ -30,6 +30,12 @@ pub unsafe fn store_u8(ptr: *mut u8, vec: VecU8) {
 
 #[must_use]
 #[inline(always)]
+pub unsafe fn load_u8(ptr: *const u8) -> VecU8 {
+    unsafe { vld1q_u8(ptr) }
+}
+
+#[must_use]
+#[inline(always)]
 pub unsafe fn load_i8(ptr: *const i8) -> VecI8 {
     unsafe { vld1q_s8(ptr) }
 }
@@ -85,6 +91,12 @@ pub fn mulhi_i16(a: VecI16, b: VecI16) -> VecI16 {
 #[inline(always)]
 pub fn mulhi_shift_i16<const SHIFT: i32>(a: VecI16, b: VecI16) -> VecI16 {
     unsafe { vqrdmulhq_s16(vshlq_s16(a, set1_i16((SHIFT - 1) as i16)), b) }
+}
+
+#[must_use]
+#[inline(always)]
+pub fn adds_i16(a: VecI16, b: VecI16) -> VecI16 {
+    unsafe { vqaddq_s16(a, b) }
 }
 
 #[must_use]

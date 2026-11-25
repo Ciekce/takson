@@ -38,6 +38,12 @@ pub unsafe fn store_u8(ptr: *mut u8, vec: VecU8) {
 
 #[must_use]
 #[inline(always)]
+pub unsafe fn load_u8(ptr: *const u8) -> VecU8 {
+    unsafe { ptr.cast::<VecU8>().read() }
+}
+
+#[must_use]
+#[inline(always)]
 pub unsafe fn load_i8(ptr: *const i8) -> VecI8 {
     unsafe { ptr.cast::<VecI8>().read() }
 }
@@ -106,6 +112,15 @@ pub fn mulhi_i16(mut a: VecI16, b: VecI16) -> VecI16 {
 pub fn mulhi_shift_i16<const SHIFT: i32>(mut a: VecI16, b: VecI16) -> VecI16 {
     for (a, b) in a.iter_mut().zip(b) {
         *a = ((i32::from(*a) * i32::from(b) + (1 << (15 - SHIFT))) >> (16 - SHIFT)) as i16;
+    }
+    a
+}
+
+#[must_use]
+#[inline(always)]
+pub fn adds_i16(mut a: VecI16, b: VecI16) -> VecI16 {
+    for (a, b) in a.iter_mut().zip(b) {
+        *a = a.saturating_add(b);
     }
     a
 }
