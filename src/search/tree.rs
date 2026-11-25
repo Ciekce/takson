@@ -135,7 +135,7 @@ impl Tree {
         for child_idx in self.tree[self.active_half][0].children() {
             let mv = self.node(child_idx).mv.unwrap();
             let policy = match root_moves.contains(&mv) {
-                true => self.get_policy(&policy_ctx, root_pos, mv, true),
+                true => self.get_policy(policy_ctx.get(mv), root_pos, mv, true),
                 false => f32::NEG_INFINITY,
             };
             self.node_mut(child_idx).policy = policy;
@@ -280,8 +280,8 @@ impl Tree {
         let first_child_idx = self.next_free_node_idx();
 
         let policy_ctx = PolicyContext::new(pos);
-        for &mv in moves.iter() {
-            let policy = self.get_policy(&policy_ctx, pos, mv, false);
+        for (&mv, logit) in moves.iter().zip(policy_ctx.iter_policy(&moves)) {
+            let policy = self.get_policy(logit, pos, mv, false);
             self.tree[self.active_half].push(Node::new(mv, policy));
         }
 
@@ -297,7 +297,8 @@ impl Tree {
         true
     }
 
-    fn get_policy(&self, ctx: &PolicyContext, pos: &Position, mv: Move, root: bool) -> f32 {
+    #[inline(always)]
+    fn get_policy(&self, logit: f32, pos: &Position, mv: Move, root: bool) -> f32 {
         const ROOT_PST: f32 = 3.0;
         const PST: f32 = 2.0;
 
@@ -322,7 +323,7 @@ impl Tree {
             let value = 1.0 - eval_value_qd(&new_pos).0;
             4.0 * (value / (1.0 - value)).ln() / pst
         } else {
-            ctx.get(mv) / pst
+            logit / pst
         };
 
         let history_logit = self.history.get(pos.stm(), mv) / pst;
