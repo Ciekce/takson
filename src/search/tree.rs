@@ -1,7 +1,9 @@
+use crate::core::Color;
 use crate::eval::policy::PolicyContext;
 use crate::eval::value::eval_value_qd;
 use crate::movegen::{MoveList, generate_moves};
 use crate::position::{FlatCountOutcome, Position};
+use crate::search::history::History;
 use crate::search::node::{Node, NodeIndex};
 use crate::takmove::Move;
 use crate::tei::TeiOptions;
@@ -57,6 +59,7 @@ pub struct Tree {
     root_pos: Position,
     value_policy: bool,
     reused_tree: bool,
+    history: History,
 }
 
 impl Tree {
@@ -69,6 +72,7 @@ impl Tree {
             root_pos: Position::startpos(),
             value_policy: false,
             reused_tree: false,
+            history: History::new(),
         }
     }
 
@@ -314,12 +318,24 @@ impl Tree {
 
         let pst = if root { ROOT_PST } else { PST };
 
-        if self.value_policy {
+        let net_logit = if self.value_policy {
             let value = 1.0 - eval_value_qd(&new_pos).0;
             4.0 * (value / (1.0 - value)).ln() / pst
         } else {
             ctx.get(mv) / pst
-        }
+        };
+
+        let history_logit = self.history.get(pos.stm(), mv) / pst;
+
+        net_logit + history_logit
+    }
+
+    pub fn update_history(&mut self, stm: Color, mv: Move, bonus: i32) {
+        self.history.update(stm, mv, bonus);
+    }
+
+    pub fn clear_history(&mut self) {
+        self.history.clear();
     }
 
     fn normalize_policy(&mut self, nodes: Range<usize>) -> f32 {
