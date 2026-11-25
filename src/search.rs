@@ -382,9 +382,6 @@ impl Searcher {
 
     #[must_use]
     fn select_expand(&mut self) -> NodeIndex {
-        const ROOT_CPUCT: f32 = 1.9;
-        const CPUCT: f32 = 1.0;
-
         let mut curr = self.tree.root_idx();
         loop {
             self.selection.push(curr);
@@ -398,14 +395,25 @@ impl Searcher {
                 break;
             }
 
-            if !curr.is_root()
-                && self.tree.node(curr).child_count == 0
-                && self.tree.node(curr).visits > 0
-                && !self.tree.expand(&self.pos, curr)
-            {
-                self.tree.flip();
-                self.reset_selection();
-                curr = self.tree.root_idx();
+            if !curr.is_root() && self.tree.node(curr).child_count == 0 && self.tree.node(curr).visits > 0 {
+                if !self.tree.expand(&self.pos, curr) {
+                    self.tree.flip();
+                    self.reset_selection();
+                    curr = self.tree.root_idx();
+                    continue;
+                }
+
+                // if we just expanded we want to pick the highest policy child
+                let mut max_policy = f32::NEG_INFINITY;
+                let mut best_child = None;
+                for child_idx in self.tree.node(curr).children() {
+                    let child = self.tree.node(child_idx);
+                    if child.policy > max_policy {
+                        max_policy = child.policy;
+                        best_child = Some(child_idx);
+                    }
+                }
+                curr = best_child.expect("surely there is at least one child (clueless)");
                 continue;
             }
 
@@ -422,30 +430,74 @@ impl Searcher {
 
             let node = self.tree.node(curr);
 
-            let cpuct = if curr.is_root() { ROOT_CPUCT } else { CPUCT };
             let fpu = if curr.is_root() { 1000.0 } else { node.q() };
 
-            let e = {
-                let mut e = cpuct;
-
-                e *= (0.546 * (node.visits as f32 + 1.0).ln()).exp();
-                e *= 1.0 + ((node.visits as f32 + 8192.0) / 8192.0).ln();
-                e *= (0.44 - 1.44 * node.policy_entropy().max(0.0001).ln()).min(2.2);
-
-                if node.visits > 1 {
-                    e *= 1.0 + 0.85 * (node.q_variance().sqrt() * 5.0 - 1.0);
+            // normalize q values (maybe not needed?)
+            let mut total_visits = 0;
+            let mut max_visits = 0;
+            let mut q_max = fpu;
+            let mut q_min = fpu;
+            for child_idx in node.children() {
+                let child = self.tree.node(child_idx);
+                if child.visits > 0 {
+                    let q = 1.0 - child.q();
+                    q_max = q_max.max(q);
+                    q_min = q_min.min(q);
+                    max_visits = max_visits.max(child.visits);
+                    total_visits += child.visits;
                 }
-
-                e
+            }
+            let q_diff = q_max - q_min;
+            let q_scale = if q_diff != 0.0 {
+                q_diff.recip()
+            } else if fpu != 0.0 {
+                fpu.recip()
+            } else {
+                1.0
             };
+            let scaling = sigma_scaling(max_visits);
+            // debug_assert!(total_visits > 0); // this is false at root but otherwise should be true
+            let recip_total_visits = if total_visits != 0 {
+                (total_visits as f32).recip()
+            } else {
+                1.0
+            };
+
+            // calculate improved policy logits
+            let mut max_improved_logit = f32::NEG_INFINITY;
+            let mut improved_logits = ArrayVec::<_, 2048>::new();
+            for child_idx in node.children() {
+                let child = self.tree.node(child_idx);
+
+                let q = if child.visits > 0 { 1.0 - child.q() } else { fpu };
+                let normalized_q = q * q_scale;
+                let scaled_q = scaling * normalized_q;
+
+                let improved_logit = child.policy + scaled_q;
+                max_improved_logit = max_improved_logit.max(improved_logit);
+
+                improved_logits.push(improved_logit);
+            }
+            assert!(max_improved_logit.is_normal());
+            // do softmax to it
+            for logit in &mut improved_logits {
+                *logit = (*logit - max_improved_logit).exp();
+            }
+            let softmax_denominator: f32 = improved_logits.iter().sum();
+            let softmax_recip = softmax_denominator.recip();
+            assert!(softmax_recip.is_normal());
+            for exp_logit in &mut improved_logits {
+                *exp_logit *= softmax_recip;
+            }
+            let improved_policy = improved_logits;
 
             let mut proven_loss = true;
             let mut longest_loss = i16::MIN;
 
-            let mut best_child = Default::default();
-            let mut best_child_puct = f32::NEG_INFINITY;
+            let mut best_child = None;
+            let mut best_error = f32::NEG_INFINITY;
 
-            for child_idx in node.children() {
+            for (child_idx, improved_pol) in node.children().zip(improved_policy) {
                 let child = self.tree.node(child_idx);
 
                 if let Some(GameState::Win(plies)) = child.state {
@@ -454,12 +506,14 @@ impl Searcher {
                     proven_loss = false;
                 }
 
-                let q = if child.visits == 0 { fpu } else { 1.0 - child.q() };
-                let puct = q + e * child.policy / (1 + child.visits) as f32;
-
-                if puct > best_child_puct {
-                    best_child = child_idx;
-                    best_child_puct = puct;
+                // pick action which maximizes error between improved policy and visit distribution
+                // i.e. we want the visit distribution to resemble the improved policy
+                assert!(improved_pol <= 1.0);
+                assert!(improved_pol >= 0.0);
+                let error = improved_pol - (child.visits as f32 * recip_total_visits);
+                if error > best_error {
+                    best_child = Some(child_idx);
+                    best_error = error;
                 }
             }
 
@@ -467,7 +521,7 @@ impl Searcher {
                 self.tree.node_mut(curr).set_state(GameState::Loss(longest_loss + 1));
             }
 
-            curr = best_child;
+            curr = best_child.expect("surely there is at least one child (clueless)");
         }
 
         assert!(!curr.is_root());
@@ -610,4 +664,11 @@ fn check_game_state(key_history: &[u64], pos: &Position, prev_move: Move) -> Gam
     }
 
     GameState::Ongoing
+}
+
+// needs tuning, and also could just be replaced by any monotonically increasing function so feel free to experiment
+fn sigma_scaling(max_visits: u32) -> f32 {
+    const C_VISIT: f32 = 50.0;
+    const C_SCALE: f32 = 0.1;
+    (C_VISIT + max_visits as f32) * C_SCALE
 }
