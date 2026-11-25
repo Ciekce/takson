@@ -10,6 +10,7 @@ use arrayvec::ArrayVec;
 use std::collections::HashSet;
 use std::time::Instant;
 
+mod history;
 mod node;
 mod tree;
 
@@ -160,6 +161,7 @@ impl Searcher {
 
     pub fn reset(&mut self) {
         self.tree.reset();
+        self.tree.clear_history();
     }
 
     fn check_limits(&self, limits: &Limits) -> bool {
@@ -493,6 +495,9 @@ impl Searcher {
         let mut ctx = NodeUpdateContext::new(u, d);
         let mut child_state = GameState::Ongoing;
 
+        let mut bonus = history::bonus(u);
+        let mut stm = self.pos.stm();
+
         while let Some(node_idx) = self.selection.pop() {
             assert_eq!(node_idx.half(), self.tree.active_half());
 
@@ -511,6 +516,18 @@ impl Searcher {
 
             ctx.flip();
             child_state = node.state.unwrap();
+
+            if child_state != GameState::Ongoing {
+                bonus = 0;
+            }
+
+            bonus = -bonus;
+            stm = stm.flip();
+
+            if bonus != 0 {
+                let mv = node.mv.unwrap();
+                self.tree.update_history(stm, mv, bonus);
+            }
         }
     }
 
