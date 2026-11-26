@@ -423,7 +423,7 @@ impl Searcher {
             let node = self.tree.node(curr);
 
             let cpuct = if curr.is_root() { ROOT_CPUCT } else { CPUCT };
-            let fpu = if curr.is_root() { 1000.0 } else { node.q() - 0.05 };
+            let fpu = if curr.is_root() { 1000.0 } else { node.q() + 0.05 };
 
             let e = {
                 let mut e = cpuct;
