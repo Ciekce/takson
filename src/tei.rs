@@ -48,7 +48,11 @@ const BENCH_POSITIONS: [&str; 25] = [
 
 #[must_use]
 pub fn wdl_to_mu(w: f32, d: f32, l: f32) -> f32 {
-    const EPSILON: f32 = 0.001;
+    const EPSILON: f64 = 0.00000001;
+
+    let w = w as f64;
+    let d = d as f64;
+    let l = l as f64;
 
     let d = d.max(EPSILON);
 
@@ -65,7 +69,7 @@ pub fn wdl_to_mu(w: f32, d: f32, l: f32) -> f32 {
 
     let mu = (a - b) / (a + b);
 
-    mu.clamp(-249.99, 249.99)
+    mu.clamp(-249.99, 249.99) as f32
 }
 
 #[derive(Copy, Clone, Debug)]
