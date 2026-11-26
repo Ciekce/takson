@@ -233,6 +233,11 @@ impl Direction {
     pub const fn offset(self) -> i8 {
         [6, -6, -1, 1][self.idx()]
     }
+
+    #[must_use]
+    pub const fn flip(self) -> Self {
+        Self::from_raw(self as u8 ^ 0x1).unwrap()
+    }
 }
 
 impl Display for Direction {

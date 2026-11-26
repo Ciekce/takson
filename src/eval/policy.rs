@@ -168,7 +168,7 @@ fn pick_land_indices(pos: &Position, mv: Move) -> (usize, usize) {
             Some(_) => 3,
         };
         land = 3 * land + digit;
-        sq = Square::from_raw((sq.raw() as i8 - mv.dir().offset()) as u8).unwrap();
+        sq = sq.shift(mv.dir().flip()).unwrap();
     }
     land -= 1;
 
