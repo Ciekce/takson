@@ -676,7 +676,7 @@ impl TeiHandler {
         let mut moves = MoveList::new();
         generate_moves(&mut moves, &self.pos);
 
-        let mut moves: Vec<_> = moves.iter().map(|&mv| (mv, ctx.get(mv))).collect();
+        let mut moves: Vec<_> = moves.iter().copied().zip(ctx.iter_policy(&self.pos, &moves)).collect();
 
         let max = moves.iter().map(|&(_, policy)| policy).reduce(f32::max).unwrap();
         moves.iter_mut().for_each(|(_, policy)| *policy = (*policy - max).exp());

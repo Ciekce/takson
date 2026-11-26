@@ -97,6 +97,12 @@ pub fn mulhi_shift_i16<const SHIFT: i32>(a: VecI16, b: VecI16) -> VecI16 {
 
 #[must_use]
 #[inline(always)]
+pub fn adds_i8(a: VecI8, b: VecI8) -> VecI8 {
+    unsafe { _mm_adds_epi8(a, b) }
+}
+
+#[must_use]
+#[inline(always)]
 pub fn adds_i16(a: VecI16, b: VecI16) -> VecI16 {
     unsafe { _mm_adds_epi16(a, b) }
 }

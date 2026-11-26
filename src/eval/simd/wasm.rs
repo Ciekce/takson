@@ -98,6 +98,12 @@ pub fn mulhi_shift_i16<const SHIFT: i32>(a: VecI16, b: VecI16) -> VecI16 {
 
 #[must_use]
 #[inline(always)]
+pub fn adds_i8(a: VecI8, b: VecI8) -> VecI8 {
+    i8x16_add_sat(a, b)
+}
+
+#[must_use]
+#[inline(always)]
 pub fn adds_i16(a: VecI16, b: VecI16) -> VecI16 {
     i16x8_add_sat(a, b)
 }

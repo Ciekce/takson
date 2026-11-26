@@ -118,6 +118,12 @@ pub fn mulhi_shift_i16<const SHIFT: i32>(mut a: VecI16, b: VecI16) -> VecI16 {
 
 #[must_use]
 #[inline(always)]
+pub fn adds_i8(a: VecI8, b: VecI8) -> VecI8 {
+    std::array::from_fn(|i| a[i].saturating_add(b[i]))
+}
+
+#[must_use]
+#[inline(always)]
 pub fn adds_i16(mut a: VecI16, b: VecI16) -> VecI16 {
     for (a, b) in a.iter_mut().zip(b) {
         *a = a.saturating_add(b);

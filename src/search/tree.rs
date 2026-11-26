@@ -135,7 +135,7 @@ impl Tree {
         for child_idx in self.tree[self.active_half][0].children() {
             let mv = self.node(child_idx).mv.unwrap();
             let policy = match root_moves.contains(&mv) {
-                true => self.get_policy(policy_ctx.get(mv), root_pos, mv, true),
+                true => self.get_policy(policy_ctx.get(root_pos, mv), root_pos, mv, true),
                 false => f32::NEG_INFINITY,
             };
             self.node_mut(child_idx).policy = policy;
@@ -280,7 +280,7 @@ impl Tree {
         let first_child_idx = self.next_free_node_idx();
 
         let policy_ctx = PolicyContext::new(pos);
-        for (&mv, logit) in moves.iter().zip(policy_ctx.iter_policy(&moves)) {
+        for (&mv, logit) in moves.iter().zip(policy_ctx.iter_policy(pos, &moves)) {
             let policy = self.get_policy(logit, pos, mv, false);
             self.tree[self.active_half].push(Node::new(mv, policy));
         }
