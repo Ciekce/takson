@@ -401,13 +401,8 @@ impl Square {
     }
 
     #[must_use]
-    pub const fn shift(self, dir: Direction) -> Option<Self> {
-        let shifted = self as i8 + dir.offset();
-        if shifted >= 0 && shifted < Self::COUNT as i8 {
-            Some(Self::from_raw(shifted as u8).unwrap())
-        } else {
-            None
-        }
+    pub const fn shift(self, dir: Direction) -> Self {
+        Self::from_raw((self as i8 + dir.offset()) as u8).unwrap()
     }
 
     #[must_use]
@@ -415,7 +410,7 @@ impl Square {
         match dir {
             Direction::Left if self.file() == 0 => None,
             Direction::Right if self.file() == 5 => None,
-            _ => self.shift(dir),
+            _ => Self::from_raw((self as i8 + dir.offset()) as u8),
         }
     }
 

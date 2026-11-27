@@ -6,13 +6,18 @@ use crate::takmove::Move;
 
 const SPREAD_PATTERNS: usize = 62;
 const MOVE_COUNT: usize = Square::COUNT * (PieceType::COUNT + 2 * SPREAD_PATTERNS);
-const Q: i32 = 128;
 
 const L1_SIZE: usize = 4096;
 
 const L1_PAIR_COUNT: usize = L1_SIZE / 2;
 
-const UPDATE_CHUNK: usize = 256;
+const Q0: i16 = 1 << Q0_BITS;
+
+const Q0_BITS: i32 = 7;
+
+const FT_OUT_BITS: i32 = 7;
+const EXPLICIT_MULHI_SHIFT_UP: i32 = FT_OUT_BITS + IMPLIED_MULHI_SHIFT_DOWN - 2 * Q0_BITS - 1;
+
 const GROUP_SIZE: usize = 4;
 const L1_UNROLL: usize = 4;
 
@@ -41,7 +46,8 @@ impl PolicyContext {
     #[must_use]
     pub fn new(pos: &Position) -> Self {
         let mut activated_ft = Align64([0; L1_SIZE / 2]);
-        accumulate_activate(&mut activated_ft.0, pos);
+        NET.ft
+            .accumulate_activate::<EXPLICIT_MULHI_SHIFT_UP, Q0, { Q0 - 1 }>(&mut activated_ft.0, pos);
         let transform = normalizer(pos.cap_sq(pos.stm()));
         Self {
             activations: activated_ft,
@@ -168,39 +174,9 @@ fn pick_land_indices(pos: &Position, mv: Move) -> (usize, usize) {
             Some(_) => 3,
         };
         land = 3 * land + digit;
-        sq = sq.shift(mv.dir().flip()).unwrap();
+        sq = sq.shift(mv.dir().flip());
     }
     land -= 1;
 
     (pick, 2 * land + usize::from(pos.top_pt(dst) == Some(PieceType::Wall)))
-}
-
-fn accumulate_activate(dst: &mut [u8; L1_PAIR_COUNT], pos: &Position) {
-    let mut rows = Updates::<L1_SIZE, UPDATE_CHUNK, i8>::default();
-    gather_rows(&mut rows, &NET.ft, pos);
-    for offset in (0..L1_PAIR_COUNT).step_by(UPDATE_CHUNK) {
-        let mut chunk_0 = Align64([0; UPDATE_CHUNK]);
-        let mut chunk_1 = Align64([0; UPDATE_CHUNK]);
-        for j in 0..UPDATE_CHUNK {
-            chunk_0.0[j] = i16::from(NET.ft.b[offset + j]);
-            chunk_1.0[j] = i16::from(NET.ft.b[L1_PAIR_COUNT + offset + j]);
-        }
-        for row in &rows.adds {
-            for j in 0..UPDATE_CHUNK {
-                chunk_0.0[j] += i16::from(row[offset + j]);
-                chunk_1.0[j] += i16::from(row[L1_PAIR_COUNT + offset + j]);
-            }
-        }
-        let activate = |offset: usize| {
-            let a = unsafe { load_i16(chunk_0.0.as_ptr().add(offset)) };
-            let b = unsafe { load_i16(chunk_1.0.as_ptr().add(offset)) };
-            let a = min_i16(max_i16(a, zero_i16()), set1_i16(Q as i16));
-            let b = min_i16(b, set1_i16(Q as i16 - 1));
-            mulhi_shift_i16::<8>(a, adds_i16(b, b))
-        };
-        for i in (0..UPDATE_CHUNK).step_by(2 * CHUNK_SIZE_I16) {
-            let packed = packus_i16(activate(packus_position(i)), activate(packus_position(i + PACKUS_LANE)));
-            unsafe { store_u8(dst.as_mut_ptr().add(offset + i), packed) };
-        }
-    }
 }
