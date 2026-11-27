@@ -9,11 +9,6 @@ const L2_SIZE: usize = 32;
 const L3_SIZE: usize = 64;
 const OUTPUTS: usize = 3;
 
-#[cfg(target_feature = "avx512f")]
-const UPDATE_CHUNK: usize = 512;
-#[cfg(not(target_feature = "avx512f"))]
-const UPDATE_CHUNK: usize = 256;
-
 const L1_PAIR_COUNT: usize = L1_SIZE / 2;
 const L2_PAIR_COUNT: usize = L2_SIZE / 2;
 
@@ -22,10 +17,14 @@ const KOMI_BUCKET_COUNT: usize = (Position::MAX_HALF_KOMI - Position::MIN_HALF_K
 const OUTPUT_BUCKET_COUNT: usize = KOMI_BUCKET_COUNT * RESERVE_BUCKET_COUNT;
 
 const Q: i32 = 64;
+const Q0: i16 = (1 << Q0_BITS) - 1;
 
 const Q0_BITS: i32 = 8;
 const Q1_BITS: i32 = 7;
 const Q_BITS: i32 = 6;
+
+const FT_OUT_BITS: i32 = 7;
+const EXPLICIT_MULHI_SHIFT_UP: i32 = FT_OUT_BITS + IMPLIED_MULHI_SHIFT_DOWN - 2 * Q0_BITS - 1;
 
 #[repr(C, align(64))]
 struct Network {
@@ -40,7 +39,7 @@ struct Network {
 
 static NET: Network = unsafe { std::mem::transmute(*include_bytes!(env!("EVALFILE"))) };
 
-const SHIFT: i32 = Q0_BITS * 2 + MULHI_SHIFT + Q1_BITS - Q_BITS;
+const SHIFT: i32 = FT_OUT_BITS + Q1_BITS - Q_BITS;
 
 const L2_UNROLL: usize = 8 / (L2_SIZE / CHUNK_SIZE_I32);
 
@@ -48,10 +47,9 @@ const L2_UNROLL: usize = 8 / (L2_SIZE / CHUNK_SIZE_I32);
 pub fn eval_value_raw(pos: &Position) -> (f32, f32, f32) {
     let output_bucket = calc_output_bucket(pos);
 
-    let acc = accumulate(pos);
-
     let mut activated_ft = Align64([0; L1_PAIR_COUNT]);
-    activate_ft::<L1_SIZE, L1_PAIR_COUNT>(&mut activated_ft.0, &acc.0);
+    NET.ft
+        .accumulate_activate::<EXPLICIT_MULHI_SHIFT_UP, Q0, Q0>(&mut activated_ft.0, pos);
 
     let mut l1_intermediate = [[zero_i32(); L2_SIZE / CHUNK_SIZE_I32]; L2_UNROLL];
     {
@@ -190,18 +188,6 @@ pub fn eval_value_qd(pos: &Position) -> (f32, f32) {
     let d = d * inv_sum;
 
     (w + d * 0.5, d)
-}
-
-#[must_use]
-fn accumulate(pos: &Position) -> Align64<[i16; L1_SIZE]> {
-    let mut acc = Align64([0; L1_SIZE]);
-
-    let mut rows = Updates::<L1_SIZE, UPDATE_CHUNK>::default();
-    gather_rows(&mut rows, &NET.ft, pos);
-
-    rows.apply(&mut acc.0, &NET.ft.b);
-
-    acc
 }
 
 #[must_use]

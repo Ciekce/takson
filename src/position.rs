@@ -486,6 +486,38 @@ impl Position {
     }
 
     #[must_use]
+    pub fn winner_after(&self, mv: Move) -> Option<Color> {
+        let stm = self.stm();
+        let flat_delta = if mv.is_spread() {
+            let info = spread_ordering_info(self, mv);
+            for side in [stm, stm.flip()] {
+                if spread_wins_road(self, &info, side) {
+                    return Some(side);
+                }
+            }
+            if !info.board_full {
+                return None;
+            }
+            info.flat_delta
+        } else {
+            let dropped_color = if self.ply() < 2 { stm.flip() } else { stm };
+            if mv.pt() != PieceType::Wall && touches_opposite_edges(mv.sq().bb(), self.influence(dropped_color)) {
+                return Some(dropped_color);
+            }
+            if self.stones_in_hand(dropped_color) != 1 && self.occ().popcount() + 1 != Square::COUNT as u32 {
+                return None;
+            }
+            i32::from(mv.pt() == PieceType::Flat) * if dropped_color == stm { 1 } else { -1 }
+        };
+
+        match (self.hfcd(stm) + 2 * flat_delta).cmp(&0) {
+            Ordering::Less => Some(stm.flip()),
+            Ordering::Equal => None,
+            Ordering::Greater => Some(stm),
+        }
+    }
+
+    #[must_use]
     pub fn is_legal(&self, mv: Move) -> bool {
         if mv.is_spread() {
             if self.ply < 2 {
@@ -585,7 +617,7 @@ impl Position {
 
             let prev_dst_top_pt = self.stacks.top_pt(mv.spread_dest());
 
-            let mut sq = mv.sq().shift(dir).unwrap();
+            let mut sq = mv.sq().shift(dir);
 
             for idx in 0..taken {
                 let color = Color::from_raw((colors >> color_idx) & 0x1).unwrap();
@@ -605,7 +637,7 @@ impl Position {
                     new_color_bbs[color].set_sq(sq);
                     new_flats_bb.set_sq(sq);
 
-                    sq = sq.shift(dir).unwrap();
+                    sq = sq.shift(dir);
                 }
             }
 
@@ -807,6 +839,84 @@ impl Position {
         self.roads[color] = road;
         self.influence[color] = influence;
     }
+}
+
+struct SpreadInfo {
+    roads: [Bitboard; Color::COUNT],
+    flat_delta: i32,
+    board_full: bool,
+}
+
+#[must_use]
+fn spread_ordering_info(pos: &Position, mv: Move) -> SpreadInfo {
+    let src = mv.sq();
+    let dir = mv.dir();
+    let stm = pos.stm();
+    let top_pt = pos.top_pt(src).unwrap();
+    let flats = pos.piece_bb(PieceType::Flat);
+    let dropped = mv.pattern().trailing_zeros();
+    let taken = Position::CARRY_LIMIT - dropped;
+    let leaves_stack = u32::from(pos.height(src)) > taken;
+    let own_colors = pos.colors_for(src, stm);
+
+    let mut new_road_bbs = [Bitboard::empty(); Color::COUNT];
+    let mut flats_after = 0;
+    if (own_colors >> taken) & 0x1 != 0 {
+        new_road_bbs[stm].set_sq(src);
+        flats_after += 1;
+    } else if leaves_stack {
+        new_road_bbs[stm.flip()].set_sq(src);
+        flats_after -= 1;
+    }
+
+    let mut dirty_bb = src.bb();
+    let mut pattern = mv.pattern() >> dropped;
+    let mut sq = src.shift(dir);
+
+    for color_idx in (1..taken).rev() {
+        pattern >>= 1;
+        if pattern & 0x1 != 0 {
+            dirty_bb.set_sq(sq);
+            if (own_colors >> color_idx) & 0x1 != 0 {
+                new_road_bbs[stm].set_sq(sq);
+                flats_after += 1;
+            } else {
+                new_road_bbs[stm.flip()].set_sq(sq);
+                flats_after -= 1;
+            }
+            sq = sq.shift(dir);
+        }
+    }
+
+    dirty_bb.set_sq(sq);
+    if top_pt.is_road() {
+        new_road_bbs[stm].set_sq(sq);
+    }
+    if top_pt == PieceType::Flat {
+        flats_after += 1;
+    }
+
+    let flats_before = (dirty_bb & flats & pos.color_bb(stm)).popcount() as i32
+        - (dirty_bb & flats & pos.color_bb(stm.flip())).popcount() as i32;
+
+    SpreadInfo {
+        roads: [Color::White, Color::Black].map(|color| (pos.roads(color) & !dirty_bb) | new_road_bbs[color]),
+        flat_delta: flats_after - flats_before,
+        board_full: leaves_stack && (!pos.occ() & !dirty_bb).is_empty(),
+    }
+}
+
+#[must_use]
+fn spread_wins_road(pos: &Position, info: &SpreadInfo, side: Color) -> bool {
+    let gained = info.roads[side] & !pos.roads(side);
+
+    touches_opposite_edges(gained, pos.influence(side)) && influence(info.roads[side]).0
+}
+
+#[must_use]
+fn touches_opposite_edges(bb: Bitboard, influence: &[Bitboard; 4]) -> bool {
+    let [up, down, left, right] = influence.map(|mask| !(mask & bb).is_empty());
+    (up && down) || (left && right)
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]

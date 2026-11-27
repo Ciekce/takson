@@ -2,7 +2,7 @@ use crate::core::Color;
 use crate::eval::policy::PolicyContext;
 use crate::eval::value::eval_value_qd;
 use crate::movegen::{MoveList, generate_moves};
-use crate::position::{FlatCountOutcome, Position};
+use crate::position::Position;
 use crate::search::history::History;
 use crate::search::node::{Node, NodeIndex};
 use crate::takmove::Move;
@@ -302,24 +302,15 @@ impl Tree {
         const ROOT_PST: f32 = 3.0;
         const PST: f32 = 2.0;
 
-        let mut new_pos = *pos;
-        new_pos.apply_move(mv);
-
-        if new_pos.has_road(pos.stm()) {
-            return 500.0;
-        } else if new_pos.has_road(pos.stm().flip()) {
-            return -500.0;
-        } else {
-            match new_pos.count_flats() {
-                FlatCountOutcome::Win(side) if side == pos.stm() => return 500.0,
-                FlatCountOutcome::Win(side) if side == pos.stm().flip() => return -500.0,
-                _ => {}
-            }
+        if let Some(side) = pos.winner_after(mv) {
+            return if side == pos.stm() { 500.0 } else { -500.0 };
         }
 
         let pst = if root { ROOT_PST } else { PST };
 
         let net_logit = if self.value_policy {
+            let mut new_pos = *pos;
+            new_pos.apply_move(mv);
             let value = 1.0 - eval_value_qd(&new_pos).0;
             4.0 * (value / (1.0 - value)).ln() / pst
         } else {
